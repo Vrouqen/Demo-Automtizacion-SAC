@@ -1,0 +1,12 @@
+{
+  "name": "cerebro-sac",
+  "version": "1.0.0",
+  "description": "Lambda serverless: recibe correos de soporte, decide con Gemini (function calling), busca credenciales en Mongo Atlas, registra analítica y crea tickets (stub Jira, en standby).",
+  "type": "module",
+  "main": "src/handler.js",
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "dotenv": "^16.4.0",
+    "mongodb": "^6.8.0"
+  }
+}

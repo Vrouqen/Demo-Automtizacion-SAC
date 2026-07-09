@@ -1,0 +1,12 @@
+{
+  "name": "carga-credenciales-sac",
+  "version": "1.0.0",
+  "description": "Lambda serverless: recibe un Excel de credenciales (Docentes/Estudiantes) y lo guarda en MongoDB Atlas.",
+  "type": "module",
+  "main": "src/handler.js",
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "mongodb": "^6.8.0",
+    "xlsx": "^0.18.5"
+  }
+}

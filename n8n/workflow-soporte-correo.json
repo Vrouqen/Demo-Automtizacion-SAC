@@ -1,0 +1,123 @@
+{
+  "name": "Soporte SAC - Correo (piloto Ecuador)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] }
+      },
+      "id": "trigger-soporte1",
+      "name": "Outlook Trigger - soporte1",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "notes": "Configura el buzón soporte1@empresa.com. Duplica este nodo 3 veces para soporte2/3/4.",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    hiloId: $json.conversationId,\n    mensajeId: $json.id,\n    remitente: $json.from?.emailAddress?.address ?? '',\n    cuentaSoporte: $json.toRecipients?.[0]?.emailAddress?.address ?? '',\n    asunto: $json.subject ?? '',\n    cuerpo: $json.body?.content ?? $json.bodyPreview ?? '',\n    adjuntos: [],\n  },\n}];"
+      },
+      "id": "code-armar-payload",
+      "name": "Code: armar payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://REEMPLAZAR-CON-TU-FUNCTION-URL.lambda-url.us-east-1.on.aws/",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "http-cerebro",
+      "name": "HTTP Request -> cerebro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 0]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "responder_y_crear_ticket",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "responder_y_crear_ticket"
+            }
+          ]
+        },
+        "fallbackOutput": "extra",
+        "options": {}
+      },
+      "id": "switch-accion",
+      "name": "Switch: accion",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [780, 0],
+      "notes": "Ambas ramas (responder y responder_y_crear_ticket) van al mismo Reply mientras Jira está en standby. Cuando Jira se active, agrega el nodo Jira en la rama responder_y_crear_ticket antes del Reply."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $('Code: armar payload').item.json.mensajeId }}",
+        "message": "={{ $('HTTP Request -> cerebro').item.json.textoRespuesta }}"
+      },
+      "id": "outlook-reply",
+      "name": "Outlook: Reply (mismo hilo)",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1040, 0],
+      "notes": "Verifica el nombre exacto del parámetro para el buzón (mailbox) si respondes desde soporte1@empresa.com y no desde la cuenta autenticada.",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Jira en STANDBY\nEl cerebro ya deja cada ticket en Mongo con estado 'pendiente_jira' y, si aplica, enlazado al ticket anterior del mismo hilo (campo 'enlazadoA'). Cuando tengan credenciales del Jira externo, agreguen aquí el nodo Jira (crear + link issue) en la rama 'responder_y_crear_ticket', y un segundo flujo (Jira Trigger o Schedule Trigger con polling) para el correo de cierre. Ver docs/SETUP_N8N.md punto 5.",
+        "height": 220,
+        "width": 320
+      },
+      "id": "sticky-jira",
+      "name": "Nota: Jira standby",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [780, 260]
+    }
+  ],
+  "connections": {
+    "Outlook Trigger - soporte1": {
+      "main": [[{ "node": "Code: armar payload", "type": "main", "index": 0 }]]
+    },
+    "Code: armar payload": {
+      "main": [[{ "node": "HTTP Request -> cerebro", "type": "main", "index": 0 }]]
+    },
+    "HTTP Request -> cerebro": {
+      "main": [[{ "node": "Switch: accion", "type": "main", "index": 0 }]]
+    },
+    "Switch: accion": {
+      "main": [
+        [{ "node": "Outlook: Reply (mismo hilo)", "type": "main", "index": 0 }],
+        [{ "node": "Outlook: Reply (mismo hilo)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}
