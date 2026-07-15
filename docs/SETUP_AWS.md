@@ -378,7 +378,12 @@ Invoke-RestMethod -Method Get -Uri "https://TU-URL-CEREBRO.lambda-url.us-east-2.
 Invoke-RestMethod -Method Get -Uri "https://TU-URL-CEREBRO.lambda-url.us-east-2.on.aws/?reporte=estudiantes_activos&idColegio=COL-001"
 ```
 
-**Carga de credenciales** (convierte el Excel a base64 primero; `plataforma` solo acepta
+**Carga de credenciales — formulario web**: abre la Function URL de `carga-credenciales-sac`
+directo en el navegador (sin nada después de la `/`) y verás un formulario para subir el Excel sin
+necesidad de terminal ni Postman. `?listar=1` (usado por la sección "Colegios cargados" del propio
+formulario) sigue devolviendo JSON puro.
+
+**Carga de credenciales — vía API** (convierte el Excel a base64 primero; `plataforma` solo acepta
 `compartir` o `creo`):
 
 ```powershell

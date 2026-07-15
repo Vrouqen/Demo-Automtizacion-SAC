@@ -19,7 +19,12 @@ producción real, la **Opción B** (DocumentDB, gestionado pero con costo).
 
 ---
 
-## Opción A — MongoDB Community en EC2 (recomendada para el piloto)
+## Opción A — MongoDB en Docker sobre EC2 (recomendada para el piloto)
+
+Mongo corre dentro de un contenedor Docker en la instancia (no instalado con `apt`). Los datos y el
+certificado TLS viven en carpetas del host montadas como volúmenes, así que el contenedor se puede
+tirar y volver a levantar (o subir de versión) sin perder nada — es la razón de elegir este camino:
+versatilidad para actualizar/recrear sin reinstalar nada en el sistema operativo.
 
 ### 1. Lanzar la instancia
 
@@ -39,50 +44,34 @@ Luego **Elastic IPs → Allocate → Associate** con la instancia (para que la I
 
 > ⚠️ **Por qué 27017 abierto a internet**: las Lambdas de este proyecto están *fuera* de VPC (para no
 > pagar NAT Gateway) y sus IPs de salida cambian, así que no se puede restringir por IP. Mitigaciones
-> obligatorias: autenticación con contraseña fuerte (paso 3), TLS (paso 4) y, además, las
+> obligatorias: autenticación con contraseña fuerte (paso 4), TLS (paso 3) y, además, las
 > credenciales de estudiantes ya viajan **cifradas a nivel de campo** (AES-256-GCM) — aunque alguien
 > lograra leer la base, no ve logins/contraseñas/PINs. Si prefieren cerrar 27017, la alternativa es
 > mover las Lambdas a la VPC y pagar el NAT Gateway (~$32/mes).
 
-### 2. Instalar MongoDB
+### 2. Instalar Docker Engine
+
+Conéctate a la instancia (SSH normal o el botón **Connect** de la consola EC2 — cualquiera de los dos
+te da una terminal donde corren estos mismos comandos):
 
 ```bash
-ssh -i mongo-sac-key.pem ubuntu@IP_ELASTICA
-
-# Repositorio oficial de MongoDB 7.0
-sudo apt-get install -y gnupg curl
-curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
-echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-sudo apt-get update && sudo apt-get install -y mongodb-org
-sudo systemctl enable --now mongod
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo systemctl enable --now docker
 ```
 
-### 3. Crear usuarios y activar autenticación
+Esto instala Docker Engine + el plugin `docker compose` (v2) en un solo paso. Verifica con
+`sudo docker --version` y `sudo docker compose version`.
+
+> Todos los comandos de aquí en adelante usan `sudo docker ...`. Si prefieres no escribir `sudo` cada
+> vez: `sudo usermod -aG docker $USER` y vuelve a conectarte (cierra y abre la terminal) para que
+> tome el nuevo grupo.
+
+### 3. Carpetas persistentes y certificado TLS
 
 ```bash
-mongosh
+sudo mkdir -p /data/mongo/db /data/mongo/certs /data/mongo/init
 ```
-```js
-use admin
-db.createUser({ user: "admin", pwd: "CONTRASEÑA_FUERTE_ADMIN", roles: ["root"] })
-use sac
-db.createUser({ user: "sac_app", pwd: "CONTRASEÑA_FUERTE_APP", roles: [{ role: "readWrite", db: "sac" }] })
-exit
-```
-
-Edita `/etc/mongod.conf`:
-```yaml
-net:
-  port: 27017
-  bindIp: 0.0.0.0        # escucha conexiones externas (protegidas por auth + TLS + SG)
-security:
-  authorization: enabled
-```
-```bash
-sudo systemctl restart mongod
-```
-
-### 4. TLS (recomendado)
 
 Certificado autofirmado (suficiente para el piloto — el cliente se conecta con
 `tlsAllowInvalidCertificates`):
@@ -90,22 +79,78 @@ Certificado autofirmado (suficiente para el piloto — el cliente se conecta con
 ```bash
 sudo openssl req -newkey rsa:2048 -nodes -x509 -days 365 \
   -subj "/CN=mongo-sac" \
-  -keyout /etc/ssl/mongo-sac.key -out /etc/ssl/mongo-sac.crt
-sudo bash -c 'cat /etc/ssl/mongo-sac.key /etc/ssl/mongo-sac.crt > /etc/ssl/mongo-sac.pem'
-sudo chown mongodb:mongodb /etc/ssl/mongo-sac.pem && sudo chmod 600 /etc/ssl/mongo-sac.pem
+  -keyout /data/mongo/certs/mongo-sac.key -out /data/mongo/certs/mongo-sac.crt
+sudo bash -c 'cat /data/mongo/certs/mongo-sac.key /data/mongo/certs/mongo-sac.crt > /data/mongo/certs/mongo-sac.pem'
+sudo chmod 600 /data/mongo/certs/mongo-sac.pem
 ```
 
-En `/etc/mongod.conf`, dentro de `net:`:
-```yaml
-  tls:
-    mode: requireTLS
-    certificateKeyFile: /etc/ssl/mongo-sac.pem
-```
+Script que crea el usuario de la app (la imagen oficial de Mongo lo ejecuta automáticamente la
+**primera vez** que arranca con `/data/mongo/db` vacío):
+
 ```bash
-sudo systemctl restart mongod
+sudo tee /data/mongo/init/init-sac.js > /dev/null <<'EOF'
+db = db.getSiblingDB('sac');
+db.createUser({ user: 'sac_app', pwd: 'CONTRASEÑA_FUERTE_APP', roles: [{ role: 'readWrite', db: 'sac' }] });
+EOF
 ```
 
-### 5. Migrar los datos desde Atlas
+### 4. Primer arranque (crea los usuarios, todavía sin TLS/auth)
+
+Arranque "de una sola vez" (no queda corriendo) que dispara el bootstrap de usuarios de la imagen
+oficial — crea el usuario `admin` (root) vía variables de entorno y, gracias al script del paso
+anterior, también `sac_app`:
+
+```bash
+sudo docker run --rm \
+  -v /data/mongo/db:/data/db \
+  -v /data/mongo/init:/docker-entrypoint-initdb.d \
+  -e MONGO_INITDB_ROOT_USERNAME=admin \
+  -e MONGO_INITDB_ROOT_PASSWORD=CONTRASEÑA_FUERTE_ADMIN \
+  mongo:7.0 --auth
+```
+
+Espera a ver una línea de log tipo `Waiting for connections` y luego detén el contenedor con
+`Ctrl+C` (el `--rm` ya lo limpia solo). Los usuarios quedan creados en `/data/mongo/db`.
+
+> Si te equivocas en las contraseñas aquí, la corrección es simple: `sudo rm -rf /data/mongo/db/*` y
+> repite este paso — no hay nada más que limpiar.
+
+### 5. Arranque definitivo (Docker Compose, con auth + TLS)
+
+```bash
+sudo mkdir -p /opt/mongo-sac
+sudo tee /opt/mongo-sac/docker-compose.yml > /dev/null <<'EOF'
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: mongo-sac
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    command: ["--auth", "--tlsMode", "requireTLS", "--tlsCertificateKeyFile", "/etc/ssl/mongo-sac.pem"]
+    volumes:
+      - /data/mongo/db:/data/db
+      - /data/mongo/certs:/etc/ssl
+EOF
+
+cd /opt/mongo-sac
+sudo docker compose up -d
+sudo docker compose logs -f mongo   # Ctrl+C para salir del log una vez veas "Waiting for connections"
+```
+
+Verifica la conexión (desde la propia instancia):
+
+```bash
+sudo docker exec -it mongo-sac mongosh \
+  "mongodb://sac_app:CONTRASEÑA_FUERTE_APP@localhost:27017/sac?tls=true&tlsAllowInvalidCertificates=true&authSource=sac" \
+  --eval "db.runCommand({ ping: 1 })"
+```
+
+**Actualizar la versión de Mongo más adelante** (la ventaja de este montaje): cambia `mongo:7.0` por
+el tag que quieras en `docker-compose.yml` y corre `sudo docker compose pull && sudo docker compose up -d`
+— los datos en `/data/mongo/db` no se tocan.
+
+### 6. Migrar los datos desde Atlas
 
 Desde tu máquina (instala [MongoDB Database Tools](https://www.mongodb.com/try/download/database-tools) si no los tienes):
 
@@ -121,7 +166,7 @@ mongorestore --uri "mongodb://sac_app:CONTRASEÑA_FUERTE_APP@IP_ELASTICA:27017/s
 > **no migrar la colección `colegios`** y volver a subir los Excels con `apps/carga-credenciales`
 > (que ya cifra al guardar). La colección `conversaciones` sí se migra tal cual.
 
-### 6. Apuntar las Lambdas a la nueva base
+### 7. Apuntar las Lambdas a la nueva base
 
 El nuevo connection string es:
 
@@ -137,11 +182,12 @@ de `docs/SETUP_AWS.md`, paso 6). Verifica con:
 Invoke-RestMethod -Uri "https://TU-URL-CARGA.lambda-url.us-east-2.on.aws/?listar=1"
 ```
 
-### 7. Backups
+### 8. Backups
 
 Snapshot automático del volumen EBS: **EC2 → Elastic Block Store → Lifecycle Manager → Create
 lifecycle policy** → snapshot diario, retener 7. (Los snapshots salen del free tier eventualmente,
-pero con 20 GiB el costo es de centavos.)
+pero con 20 GiB el costo es de centavos.) Como `/data/mongo` vive en el volumen raíz de la instancia,
+el snapshot del volumen cubre datos + certificado + `docker-compose.yml` sin configuración aparte.
 
 Cuando todo esté verificado, pausa/elimina el cluster de Atlas para no dejar una copia huérfana de
 los datos.
