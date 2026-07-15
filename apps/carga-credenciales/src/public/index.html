@@ -18,8 +18,10 @@
     --ok-soft: #e8f7ef;
     --err: #c0392b;
     --err-soft: #fdecea;
+    --info-soft: #eef2ff;
+    --info: #4338ca;
     --radius: 12px;
-    --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 16px rgba(16, 24, 40, 0.06);
+    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 4px 16px rgba(16, 24, 40, .06);
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -35,277 +37,260 @@
       --ok-soft: #103326;
       --err: #ff6b6b;
       --err-soft: #3a1f1f;
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+      --info-soft: #1e2140;
+      --info: #a5b4fc;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
     }
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    min-height: 100vh;
-    background: var(--bg);
-    color: var(--text);
+    margin: 0; min-height: 100vh;
+    background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
-  .page {
-    max-width: 760px;
-    margin: 0 auto;
-    padding: 40px 20px 64px;
-  }
-  header.top {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 28px;
-  }
+  .page { max-width: 780px; margin: 0 auto; padding: 40px 20px 64px; }
+  [hidden] { display: none !important; }
+
+  header.top { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
   .logo-mark {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
+    width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
     background: linear-gradient(135deg, var(--accent), var(--accent-dark));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-weight: 700;
-    font-size: 18px;
-    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 18px;
   }
-  header.top h1 {
-    font-size: 20px;
-    margin: 0;
-    line-height: 1.25;
-  }
-  header.top p {
-    margin: 2px 0 0;
-    font-size: 13px;
-    color: var(--text-muted);
-  }
+  header.top h1 { font-size: 20px; margin: 0; line-height: 1.25; }
+  header.top p { margin: 2px 0 0; font-size: 13px; color: var(--text-muted); }
+  header.top .sesion { margin-left: auto; text-align: right; font-size: 12px; color: var(--text-muted); }
+
   .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 28px;
-    margin-bottom: 20px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 28px; margin-bottom: 20px;
   }
   .card h2 {
-    font-size: 15px;
-    margin: 0 0 18px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    font-size: 15px; margin: 0 0 4px;
+    display: flex; align-items: center; gap: 8px;
   }
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-  }
-  .field { display: flex; flex-direction: column; gap: 6px; }
+  .card h2 .hint { font-weight: 400; font-size: 12.5px; color: var(--text-muted); }
+  .sep { margin: 22px 0 16px; border: none; border-top: 1px solid var(--border); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; position: relative; }
   .field.full { grid-column: 1 / -1; }
-  label {
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--text-muted);
+  label { font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
+  input[type="text"], input[type="password"], select {
+    appearance: none; width: 100%;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 14px; color: var(--text); outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+    font-family: inherit;
   }
-  input[type="text"], select {
-    appearance: none;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-size: 14px;
-    color: var(--text);
-    outline: none;
-    transition: border-color .15s ease, box-shadow .15s ease;
-  }
-  input[type="text"]:focus, select:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-  .platform-toggle {
-    display: flex;
-    gap: 10px;
-  }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  select:disabled { opacity: .5; cursor: not-allowed; }
+  input.autollenado { border-color: var(--info); background: var(--info-soft); }
+
+  .platform-toggle { display: flex; gap: 10px; }
   .platform-toggle label {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-size: 13.5px;
-    font-weight: 600;
-    color: var(--text);
-    cursor: pointer;
-    background: var(--bg);
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    font-size: 13.5px; font-weight: 600; color: var(--text);
+    cursor: pointer; background: var(--bg);
   }
   .platform-toggle input { accent-color: var(--accent); }
   .platform-toggle label:has(input:checked) {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-dark);
+    border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark);
   }
+
+  .sugerencias {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+    margin-top: 4px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--shadow); overflow: hidden; max-height: 260px; overflow-y: auto;
+  }
+  .sugerencias li {
+    list-style: none; padding: 9px 12px; cursor: pointer; font-size: 13.5px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .sugerencias li small { color: var(--text-muted); font-size: 11.5px; }
+  .sugerencias li[aria-selected="true"], .sugerencias li:hover { background: var(--accent-soft); }
+  .sugerencias ul { margin: 0; padding: 0; }
+
   .dropzone {
-    border: 1.5px dashed var(--border);
-    border-radius: 10px;
-    padding: 22px;
-    text-align: center;
-    cursor: pointer;
-    color: var(--text-muted);
-    font-size: 13.5px;
-    transition: border-color .15s ease, background .15s ease;
+    border: 1.5px dashed var(--border); border-radius: 10px; padding: 22px;
+    text-align: center; cursor: pointer; color: var(--text-muted); font-size: 13.5px;
+    display: block; transition: border-color .15s ease, background .15s ease;
   }
   .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
   .dropzone strong { color: var(--text); }
   .dropzone input { display: none; }
   .file-chip {
-    margin-top: 10px;
-    display: none;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    background: var(--accent-soft);
-    color: var(--accent-dark);
-    border-radius: 8px;
-    padding: 8px 12px;
-    width: fit-content;
+    margin-top: 10px; display: none; align-items: center; gap: 8px; font-size: 13px;
+    background: var(--accent-soft); color: var(--accent-dark);
+    border-radius: 8px; padding: 8px 12px; width: fit-content;
   }
+
   button.submit {
-    width: 100%;
-    margin-top: 22px;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 9px;
-    padding: 13px 16px;
-    font-size: 14.5px;
-    font-weight: 700;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
+    width: 100%; margin-top: 22px;
+    background: var(--accent); color: #fff; border: none; border-radius: 9px;
+    padding: 13px 16px; font-size: 14.5px; font-weight: 700; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
     transition: background .15s ease, opacity .15s ease;
   }
   button.submit:hover { background: var(--accent-dark); }
   button.submit:disabled { opacity: .6; cursor: not-allowed; }
   .spinner {
-    width: 15px; height: 15px;
-    border: 2px solid rgba(255,255,255,.4);
-    border-top-color: #fff;
-    border-radius: 50%;
-    animation: spin .7s linear infinite;
-    display: none;
+    width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff; border-radius: 50%;
+    animation: spin .7s linear infinite; display: none;
   }
   button.submit.loading .spinner { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
   .banner {
-    display: none;
-    border-radius: 9px;
-    padding: 12px 14px;
-    font-size: 13.5px;
-    margin-top: 16px;
-    gap: 8px;
-    align-items: flex-start;
-    line-height: 1.45;
+    display: none; border-radius: 9px; padding: 12px 14px; font-size: 13.5px;
+    margin-top: 16px; gap: 8px; align-items: flex-start; line-height: 1.45;
   }
   .banner.show { display: flex; }
   .banner.ok { background: var(--ok-soft); color: var(--ok); }
   .banner.err { background: var(--err-soft); color: var(--err); }
-  .banner b { color: inherit; }
+  .banner.info { background: var(--info-soft); color: var(--info); }
+
   .link-btn {
-    background: none;
-    border: none;
-    color: var(--accent);
-    font-weight: 600;
-    font-size: 13.5px;
-    cursor: pointer;
-    padding: 0;
+    background: none; border: none; color: var(--accent);
+    font-weight: 600; font-size: 13px; cursor: pointer; padding: 0;
   }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
   th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
   .pill {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent-dark);
-    margin-right: 4px;
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 2px 8px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent-dark); margin: 0 4px 2px 0;
   }
+  .pill.neutro { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
   .empty-state { color: var(--text-muted); font-size: 13.5px; text-align: center; padding: 12px 0; }
+
+  /* Login */
+  .login-wrap { max-width: 380px; margin: 8vh auto 0; }
+  .login-wrap .logo-mark { width: 52px; height: 52px; margin: 0 auto 16px; }
+  .login-wrap h1 { font-size: 19px; text-align: center; margin: 0 0 4px; }
+  .login-wrap p.sub { font-size: 13px; color: var(--text-muted); text-align: center; margin: 0 0 24px; }
+  .login-wrap .field { margin-bottom: 14px; }
+
   footer {
-    text-align: center;
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 32px;
-    line-height: 1.7;
+    text-align: center; font-size: 12px; color: var(--text-muted);
+    margin-top: 32px; line-height: 1.7;
   }
   footer .brand { font-weight: 600; color: var(--text); }
-  @media (max-width: 560px) {
-    .grid { grid-template-columns: 1fr; }
-  }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-<div class="page">
+
+<!-- ───────────────── Login ───────────────── -->
+<div class="page login-wrap" id="vista-login">
+  <div class="logo-mark">SAC</div>
+  <h1>Carga de Credenciales</h1>
+  <p class="sub">Ingresa para administrar las credenciales de los colegios.</p>
+  <form class="card" id="form-login">
+    <div class="field">
+      <label for="usuario">Usuario</label>
+      <input type="text" id="usuario" autocomplete="username" required autofocus />
+    </div>
+    <div class="field">
+      <label for="clave">Contraseña</label>
+      <input type="password" id="clave" autocomplete="current-password" required />
+    </div>
+    <button class="submit" type="submit" id="btn-login">
+      <span class="spinner"></span>
+      <span id="login-label">Ingresar</span>
+    </button>
+    <div class="banner" id="login-banner"></div>
+  </form>
+  <footer>
+    <div class="brand">Tecnología Educativa Ecuador</div>
+    <div>Quito, Ecuador — Santillana</div>
+  </footer>
+</div>
+
+<!-- ───────────────── App ───────────────── -->
+<div class="page" id="vista-app" hidden>
   <header class="top">
     <div class="logo-mark">SAC</div>
     <div>
       <h1>Carga de Credenciales</h1>
       <p>Sube el Excel de un colegio y guárdalo cifrado en la base de datos.</p>
     </div>
+    <div class="sesion">
+      <div id="sesion-usuario"></div>
+      <button class="link-btn" id="btn-salir">Cerrar sesión</button>
+    </div>
   </header>
 
   <form class="card" id="form-carga">
-    <h2>Datos del colegio</h2>
-    <div class="grid">
-      <div class="field">
-        <label for="idColegio">Id Colegio (Pegasus)</label>
-        <input type="text" id="idColegio" name="idColegio" placeholder="COL-001" required />
-      </div>
-      <div class="field">
-        <label for="codigoColegio">Código colegio</label>
-        <input type="text" id="codigoColegio" name="codigoColegio" placeholder="UE-QUITO-01" required />
-      </div>
-      <div class="field">
-        <label for="region">Región</label>
-        <select id="region" name="region">
-          <option value="">Seleccionar…</option>
-          <option>Costa</option>
-          <option>Sierra</option>
-          <option>Oriente</option>
-          <option>Insular</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="ciudad">Ciudad (Provincia)</label>
-        <input type="text" id="ciudad" name="ciudad" placeholder="Pichincha" />
-      </div>
-      <div class="field">
-        <label for="canton">Cantón</label>
-        <input type="text" id="canton" name="canton" placeholder="Quito" />
-      </div>
-      <div class="field">
+    <h2>Colegio <span class="hint">— escribe el nombre; si ya está registrado, se autocompleta todo</span></h2>
+    <div class="grid" style="margin-top:14px">
+      <div class="field full">
         <label for="nombreColegio">Nombre de colegio (del avance)</label>
-        <input type="text" id="nombreColegio" name="nombreColegio" placeholder="Unidad Educativa San Francisco de Quito" required />
+        <input type="text" id="nombreColegio" autocomplete="off" placeholder="Escribe para buscar…" required />
+        <div class="sugerencias" id="sug-colegio" hidden><ul id="sug-lista"></ul></div>
       </div>
     </div>
 
-    <h2 style="margin-top:24px">Plataforma</h2>
-    <div class="platform-toggle">
+    <hr class="sep" />
+    <h2>Ubicación <span class="hint">— región → provincia → cantón</span></h2>
+    <div class="grid" style="margin-top:14px">
+      <div class="field">
+        <label for="region">Región</label>
+        <select id="region" required>
+          <option value="">Seleccionar…</option>
+          <option value="Costa">Costa</option>
+          <option value="Sierra">Sierra</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="provincia">Ciudad (Provincia)</label>
+        <select id="provincia" required disabled>
+          <option value="">Elige una región primero</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="canton">Cantón</label>
+        <select id="canton" required disabled>
+          <option value="">Elige una provincia primero</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="periodo">Periodo escolar</label>
+        <select id="periodo" required></select>
+      </div>
+    </div>
+
+    <hr class="sep" />
+    <h2>Identificación</h2>
+    <div class="grid" style="margin-top:14px">
+      <div class="field">
+        <label for="idColegio">Id Colegio (Pegasus)</label>
+        <input type="text" id="idColegio" placeholder="COL-001" required />
+      </div>
+      <div class="field">
+        <label for="codigoColegio">Código colegio</label>
+        <input type="text" id="codigoColegio" placeholder="UE-QUITO-01" required />
+      </div>
+    </div>
+
+    <hr class="sep" />
+    <h2>Plataforma</h2>
+    <div class="platform-toggle" style="margin-top:14px">
       <label><input type="radio" name="plataforma" value="compartir" checked /> Compartir</label>
       <label><input type="radio" name="plataforma" value="creo" /> CREO</label>
     </div>
 
-    <h2 style="margin-top:24px">Archivo de credenciales</h2>
-    <label class="dropzone" id="dropzone" for="archivo">
+    <hr class="sep" />
+    <h2>Archivo de credenciales</h2>
+    <label class="dropzone" id="dropzone" for="archivo" style="margin-top:14px">
       <span><strong>Haz clic para elegir</strong> o arrastra aquí el Excel (.xlsx)</span>
-      <input type="file" id="archivo" name="archivo" accept=".xlsx,.xlsm,.xltx,.xltm" required />
+      <input type="file" id="archivo" accept=".xlsx,.xlsm,.xltx,.xltm" required />
     </label>
     <div class="file-chip" id="file-chip"></div>
 
@@ -313,13 +298,14 @@
       <span class="spinner"></span>
       <span id="btn-label">Cargar credenciales</span>
     </button>
-
     <div class="banner" id="banner"></div>
   </form>
 
   <section class="card">
-    <h2>Colegios cargados <button type="button" class="link-btn" id="btn-refrescar" style="margin-left:auto">Actualizar</button></h2>
-    <div id="lista-colegios"><p class="empty-state">Cargando…</p></div>
+    <h2>Colegios cargados
+      <button type="button" class="link-btn" id="btn-refrescar" style="margin-left:auto">Actualizar</button>
+    </h2>
+    <div id="lista-colegios" style="margin-top:14px"><p class="empty-state">Cargando…</p></div>
   </section>
 
   <footer>
@@ -330,131 +316,429 @@
 
 <script>
 (function () {
-  const form = document.getElementById('form-carga');
-  const dropzone = document.getElementById('dropzone');
-  const input = document.getElementById('archivo');
-  const fileChip = document.getElementById('file-chip');
-  const btn = document.getElementById('btn-submit');
-  const btnLabel = document.getElementById('btn-label');
-  const banner = document.getElementById('banner');
-  const listaEl = document.getElementById('lista-colegios');
-  const btnRefrescar = document.getElementById('btn-refrescar');
+  'use strict';
 
-  ['dragover', 'dragenter'].forEach((ev) =>
-    dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.add('drag'); })
-  );
-  ['dragleave', 'drop'].forEach((ev) =>
-    dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.remove('drag'); })
-  );
-  dropzone.addEventListener('drop', (e) => {
-    const f = e.dataTransfer.files[0];
-    if (f) { input.files = e.dataTransfer.files; mostrarArchivo(f); }
+  // ── Geografía: solo Costa y Sierra (régimen escolar del piloto) ──────────
+  var GEO = {
+    Costa: {
+      'El Oro': ['Machala','Pasaje','Santa Rosa','Huaquillas','Arenillas','El Guabo','Piñas','Zaruma','Balsas','Atahualpa','Chilla','Las Lajas','Marcabelí','Portovelo'],
+      'Esmeraldas': ['Esmeraldas','Atacames','Quinindé','San Lorenzo','Muisne','Eloy Alfaro','Rioverde','La Concordia'],
+      'Guayas': ['Guayaquil','Durán','Samborondón','Daule','Milagro','Playas','Salitre','Yaguachi','Naranjal','Balzar','El Empalme','Naranjito','Pedro Carbo','Santa Lucía','Palestina','Colimes','Balao','Isidro Ayora','Lomas de Sargentillo','Nobol','Simón Bolívar','Coronel Marcelino Maridueña','General Antonio Elizalde','Alfredo Baquerizo Moreno'],
+      'Los Ríos': ['Babahoyo','Quevedo','Ventanas','Vinces','Buena Fe','Valencia','Montalvo','Palenque','Puebloviejo','Urdaneta','Baba','Mocache','Quinsaloma'],
+      'Manabí': ['Portoviejo','Manta','Chone','Montecristi','Jipijapa','El Carmen','Sucre','Pedernales','Rocafuerte','Santa Ana','Tosagua','Jaramijó','Puerto López','Jama','Flavio Alfaro','Junín','Bolívar','24 de Mayo','Paján','Pichincha','Olmedo','San Vicente'],
+      'Santa Elena': ['Santa Elena','La Libertad','Salinas'],
+      'Santo Domingo de los Tsáchilas': ['Santo Domingo','La Concordia']
+    },
+    Sierra: {
+      'Azuay': ['Cuenca','Gualaceo','Paute','Santa Isabel','Sígsig','Girón','Chordeleg','Nabón','Oña','Pucará','San Fernando','Sevilla de Oro','El Pan','Guachapala','Camilo Ponce Enríquez'],
+      'Bolívar': ['Guaranda','San Miguel','Chillanes','Chimbo','Echeandía','Caluma','Las Naves'],
+      'Cañar': ['Azogues','La Troncal','Cañar','Biblián','Déleg','El Tambo','Suscal'],
+      'Carchi': ['Tulcán','Montúfar','Espejo','Mira','Bolívar','Huaca'],
+      'Chimborazo': ['Riobamba','Alausí','Guano','Colta','Chunchi','Guamote','Penipe','Pallatanga','Cumandá','Chambo'],
+      'Cotopaxi': ['Latacunga','La Maná','Salcedo','Pujilí','Saquisilí','Sigchos','Pangua'],
+      'Imbabura': ['Ibarra','Otavalo','Cotacachi','Antonio Ante','Pimampiro','Urcuquí'],
+      'Loja': ['Loja','Catamayo','Calvas','Macará','Saraguro','Paltas','Celica','Zapotillo','Puyango','Gonzanamá','Espíndola','Chaguarpamba','Olmedo','Pindal','Quilanga','Sozoranga'],
+      'Pichincha': ['Quito','Rumiñahui','Cayambe','Mejía','Pedro Moncayo','Pedro Vicente Maldonado','Puerto Quito','San Miguel de los Bancos'],
+      'Tungurahua': ['Ambato','Baños de Agua Santa','San Pedro de Pelileo','Santiago de Píllaro','Cevallos','Mocha','Patate','Quero','Tisaleo']
+    }
+  };
+
+  // ── Utilidades ──────────────────────────────────────────────────────────
+  function normalizar(t) {
+    if (t === null || t === undefined) return '';
+    return String(t).toLowerCase().normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9ñ\s]/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function escapeHtml(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  // Coeficiente de Dice sobre bigramas: tolera errores de tipeo, no solo prefijos.
+  function similitud(a, b) {
+    a = normalizar(a); b = normalizar(b);
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+    var bigramas = {}, total = 0, i, bg;
+    for (i = 0; i < a.length - 1; i++) {
+      bg = a.slice(i, i + 2);
+      bigramas[bg] = (bigramas[bg] || 0) + 1;
+    }
+    for (i = 0; i < b.length - 1; i++) {
+      bg = b.slice(i, i + 2);
+      if (bigramas[bg] > 0) { bigramas[bg]--; total++; }
+    }
+    return (2 * total) / (a.length - 1 + b.length - 1);
+  }
+  function periodoActual() {
+    var hoy = new Date();
+    // El año lectivo arranca a mitad de año (régimen Costa en mayo, Sierra en
+    // septiembre): de mayo en adelante ya cuenta como el periodo que inicia.
+    var inicio = hoy.getMonth() + 1 >= 5 ? hoy.getFullYear() : hoy.getFullYear() - 1;
+    return inicio + '-' + (inicio + 1);
+  }
+
+  // ── Estado ──────────────────────────────────────────────────────────────
+  var token = null;
+  var colegios = [];
+  var LLAVE_TOKEN = 'sac.token';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var vistaLogin = $('vista-login'), vistaApp = $('vista-app');
+
+  // ── API ─────────────────────────────────────────────────────────────────
+  function api(ruta, opciones) {
+    opciones = opciones || {};
+    var headers = opciones.headers || {};
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    opciones.headers = headers;
+    return fetch(ruta, opciones).then(function (resp) {
+      if (resp.status === 401 && token) { cerrarSesion(); throw new Error('Sesión expirada'); }
+      return resp.json().then(function (datos) { return { ok: resp.ok, datos: datos }; });
+    });
+  }
+
+  function mostrarBanner(el, tipo, html) {
+    el.className = 'banner show ' + tipo;
+    el.innerHTML = html;
+  }
+
+  // ── Login ───────────────────────────────────────────────────────────────
+  var formLogin = $('form-login'), loginBanner = $('login-banner');
+  var btnLogin = $('btn-login'), loginLabel = $('login-label');
+
+  formLogin.addEventListener('submit', function (e) {
+    e.preventDefault();
+    btnLogin.disabled = true; btnLogin.classList.add('loading');
+    loginLabel.textContent = 'Verificando…'; loginBanner.className = 'banner';
+
+    api('?login=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ usuario: $('usuario').value.trim(), clave: $('clave').value })
+    }).then(function (r) {
+      if (!r.ok) { mostrarBanner(loginBanner, 'err', escapeHtml(r.datos.error || 'No se pudo ingresar')); return; }
+      token = r.datos.token;
+      try { sessionStorage.setItem(LLAVE_TOKEN, token); } catch (err) { /* modo privado */ }
+      $('sesion-usuario').textContent = r.datos.usuario;
+      abrirApp();
+    }).catch(function (err) {
+      mostrarBanner(loginBanner, 'err', 'Error de red: ' + escapeHtml(err.message));
+    }).finally(function () {
+      btnLogin.disabled = false; btnLogin.classList.remove('loading');
+      loginLabel.textContent = 'Ingresar'; $('clave').value = '';
+    });
   });
-  input.addEventListener('change', () => { if (input.files[0]) mostrarArchivo(input.files[0]); });
 
+  function cerrarSesion() {
+    token = null;
+    try { sessionStorage.removeItem(LLAVE_TOKEN); } catch (err) { /* ignora */ }
+    vistaApp.hidden = true; vistaLogin.hidden = false;
+  }
+  $('btn-salir').addEventListener('click', cerrarSesion);
+
+  function abrirApp() {
+    vistaLogin.hidden = true; vistaApp.hidden = false;
+    cargarColegios();
+  }
+
+  // ── Periodo escolar ─────────────────────────────────────────────────────
+  (function initPeriodos() {
+    var actual = periodoActual();
+    var inicio = parseInt(actual.slice(0, 4), 10);
+    var sel = $('periodo');
+    // Un periodo hacia atrás (para completar cargas del año anterior) y tres hacia adelante.
+    for (var y = inicio - 1; y <= inicio + 3; y++) {
+      var v = y + '-' + (y + 1);
+      var opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      if (v === actual) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  })();
+
+  // ── Cascada geográfica ──────────────────────────────────────────────────
+  var selRegion = $('region'), selProvincia = $('provincia'), selCanton = $('canton');
+
+  function llenarSelect(sel, valores, placeholder) {
+    sel.innerHTML = '';
+    var opt0 = document.createElement('option');
+    opt0.value = ''; opt0.textContent = placeholder;
+    sel.appendChild(opt0);
+    valores.forEach(function (v) {
+      var o = document.createElement('option');
+      o.value = v; o.textContent = v;
+      sel.appendChild(o);
+    });
+    sel.disabled = valores.length === 0;
+  }
+
+  function refrescarProvincias(region, mantener) {
+    var provincias = region && GEO[region] ? Object.keys(GEO[region]).sort() : [];
+    llenarSelect(selProvincia, provincias, region ? 'Seleccionar…' : 'Elige una región primero');
+    if (mantener && provincias.indexOf(mantener) !== -1) selProvincia.value = mantener;
+  }
+  function refrescarCantones(region, provincia, mantener) {
+    var cantones = region && provincia && GEO[region] && GEO[region][provincia]
+      ? GEO[region][provincia].slice().sort() : [];
+    llenarSelect(selCanton, cantones, provincia ? 'Seleccionar…' : 'Elige una provincia primero');
+    if (mantener && cantones.indexOf(mantener) !== -1) selCanton.value = mantener;
+  }
+
+  selRegion.addEventListener('change', function () {
+    refrescarProvincias(selRegion.value);
+    refrescarCantones(selRegion.value, '');
+    limpiarAutollenado();
+  });
+  selProvincia.addEventListener('change', function () {
+    refrescarCantones(selRegion.value, selProvincia.value);
+    limpiarAutollenado();
+  });
+  selCanton.addEventListener('change', function () {
+    limpiarAutollenado();
+    autocompletarDesdeCanton();
+  });
+
+  // Si en el cantón elegido hay UN solo colegio ya registrado, se completa solo.
+  function autocompletarDesdeCanton() {
+    if (!selCanton.value || $('nombreColegio').value.trim()) return;
+    var enCanton = colegios.filter(function (c) {
+      return normalizar(c.canton) === normalizar(selCanton.value);
+    });
+    if (enCanton.length === 1) {
+      aplicarColegio(enCanton[0], 'Se autocompletó con el único colegio registrado en ' + selCanton.value + '.');
+    } else if (enCanton.length > 1) {
+      mostrarBanner($('banner'), 'info',
+        '<b>' + enCanton.length + ' colegios</b> registrados en ' + escapeHtml(selCanton.value) +
+        '. Escribe el nombre arriba para elegir uno.');
+    }
+  }
+
+  // ── Autocompletado de colegio ───────────────────────────────────────────
+  var inputColegio = $('nombreColegio');
+  var cajaSug = $('sug-colegio'), listaSug = $('sug-lista');
+  var indiceSug = -1, sugerenciasActuales = [];
+
+  var CAMPOS_AUTO = ['idColegio', 'codigoColegio'];
+  function marcarAutollenado() {
+    CAMPOS_AUTO.forEach(function (id) { $(id).classList.add('autollenado'); });
+  }
+  function limpiarAutollenado() {
+    CAMPOS_AUTO.forEach(function (id) { $(id).classList.remove('autollenado'); });
+  }
+
+  function candidatos(texto) {
+    var q = normalizar(texto);
+    if (!q) return [];
+    // Respeta el filtro geográfico ya elegido, si lo hay.
+    var base = colegios.filter(function (c) {
+      if (selRegion.value && normalizar(c.region) !== normalizar(selRegion.value)) return false;
+      if (selProvincia.value && normalizar(c.ciudad) !== normalizar(selProvincia.value)) return false;
+      if (selCanton.value && normalizar(c.canton) !== normalizar(selCanton.value)) return false;
+      return true;
+    });
+    return base.map(function (c) {
+      var n = normalizar(c.nombre);
+      // Una subcadena exacta gana sobre el parecido difuso.
+      var score = n.indexOf(q) !== -1 ? 0.9 + Math.min(q.length / Math.max(n.length, 1), 0.1)
+                                      : similitud(q, n);
+      if (normalizar(c.codigo) === q || normalizar(c.id) === q) score = 1;
+      return { colegio: c, score: score };
+    }).filter(function (x) { return x.score >= 0.34; })
+      .sort(function (a, b) { return b.score - a.score; })
+      .slice(0, 6);
+  }
+
+  function pintarSugerencias(items) {
+    sugerenciasActuales = items; indiceSug = -1;
+    if (items.length === 0) { cajaSug.hidden = true; listaSug.innerHTML = ''; return; }
+    listaSug.innerHTML = items.map(function (x, i) {
+      var c = x.colegio;
+      var ubic = [c.canton, c.ciudad, c.region].filter(Boolean).join(' · ');
+      return '<li role="option" data-i="' + i + '" aria-selected="false">' +
+             '<span>' + escapeHtml(c.nombre) + '</span>' +
+             '<small>' + escapeHtml(c.codigo || '') + (ubic ? ' — ' + escapeHtml(ubic) : '') + '</small></li>';
+    }).join('');
+    cajaSug.hidden = false;
+  }
+
+  function resaltar(i) {
+    var lis = listaSug.querySelectorAll('li');
+    Array.prototype.forEach.call(lis, function (li, j) {
+      li.setAttribute('aria-selected', j === i ? 'true' : 'false');
+    });
+    indiceSug = i;
+  }
+
+  function aplicarColegio(c, mensaje) {
+    inputColegio.value = c.nombre;
+    $('idColegio').value = c.id || '';
+    $('codigoColegio').value = c.codigo || '';
+    if (c.region && GEO[c.region]) {
+      selRegion.value = c.region;
+      refrescarProvincias(c.region, c.ciudad);
+      refrescarCantones(c.region, selProvincia.value, c.canton);
+    }
+    marcarAutollenado();
+    cajaSug.hidden = true;
+    mostrarBanner($('banner'), 'info', mensaje ||
+      '<b>' + escapeHtml(c.nombre) + '</b> ya está registrado — se completaron sus datos. ' +
+      'Elige plataforma y periodo, y sube el Excel.');
+  }
+
+  inputColegio.addEventListener('input', function () {
+    limpiarAutollenado();
+    pintarSugerencias(candidatos(inputColegio.value));
+  });
+  inputColegio.addEventListener('keydown', function (e) {
+    if (cajaSug.hidden || sugerenciasActuales.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); resaltar((indiceSug + 1) % sugerenciasActuales.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); resaltar((indiceSug - 1 + sugerenciasActuales.length) % sugerenciasActuales.length); }
+    else if (e.key === 'Enter' && indiceSug >= 0) { e.preventDefault(); aplicarColegio(sugerenciasActuales[indiceSug].colegio); }
+    else if (e.key === 'Escape') { cajaSug.hidden = true; }
+  });
+  listaSug.addEventListener('mousedown', function (e) {
+    var li = e.target.closest('li');
+    if (!li) return;
+    e.preventDefault();
+    aplicarColegio(sugerenciasActuales[Number(li.dataset.i)].colegio);
+  });
+  document.addEventListener('click', function (e) {
+    if (!cajaSug.contains(e.target) && e.target !== inputColegio) cajaSug.hidden = true;
+  });
+
+  // ── Archivo ─────────────────────────────────────────────────────────────
+  var dropzone = $('dropzone'), inputArchivo = $('archivo'), fileChip = $('file-chip');
+  ['dragover', 'dragenter'].forEach(function (ev) {
+    dropzone.addEventListener(ev, function (e) { e.preventDefault(); dropzone.classList.add('drag'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    dropzone.addEventListener(ev, function (e) { e.preventDefault(); dropzone.classList.remove('drag'); });
+  });
+  dropzone.addEventListener('drop', function (e) {
+    var f = e.dataTransfer.files[0];
+    if (f) { inputArchivo.files = e.dataTransfer.files; mostrarArchivo(f); }
+  });
+  inputArchivo.addEventListener('change', function () {
+    if (inputArchivo.files[0]) mostrarArchivo(inputArchivo.files[0]);
+  });
   function mostrarArchivo(f) {
     fileChip.style.display = 'flex';
     fileChip.textContent = f.name + ' · ' + (f.size / 1024).toFixed(0) + ' KB';
   }
-
-  function mostrarBanner(tipo, html) {
-    banner.className = 'banner show ' + tipo;
-    banner.innerHTML = html;
-  }
-
-  function leerArchivoBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
+  function leerBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result.split(',')[1]); };
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
   }
 
-  form.addEventListener('submit', async (e) => {
+  // ── Envío ───────────────────────────────────────────────────────────────
+  var formCarga = $('form-carga'), banner = $('banner');
+  var btn = $('btn-submit'), btnLabel = $('btn-label');
+
+  formCarga.addEventListener('submit', function (e) {
     e.preventDefault();
-    const file = input.files[0];
+    var file = inputArchivo.files[0];
     if (!file) return;
 
-    btn.disabled = true;
-    btn.classList.add('loading');
-    btnLabel.textContent = 'Cargando…';
-    banner.className = 'banner';
+    btn.disabled = true; btn.classList.add('loading');
+    btnLabel.textContent = 'Cargando…'; banner.className = 'banner';
 
-    try {
-      const archivoBase64 = await leerArchivoBase64(file);
-      const body = {
-        idColegio: form.idColegio.value.trim(),
-        codigoColegio: form.codigoColegio.value.trim(),
-        region: form.region.value,
-        ciudad: form.ciudad.value.trim(),
-        canton: form.canton.value.trim(),
-        nombreColegio: form.nombreColegio.value.trim(),
-        plataforma: form.plataforma.value,
-        nombreArchivo: file.name,
-        archivoBase64,
-      };
-
-      const resp = await fetch('', {
+    leerBase64(file).then(function (archivoBase64) {
+      return api('', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          idColegio: $('idColegio').value.trim(),
+          codigoColegio: $('codigoColegio').value.trim(),
+          region: selRegion.value,
+          ciudad: selProvincia.value,
+          canton: selCanton.value,
+          nombreColegio: inputColegio.value.trim(),
+          plataforma: formCarga.plataforma.value,
+          periodo: $('periodo').value,
+          nombreArchivo: file.name,
+          archivoBase64: archivoBase64
+        })
       });
-      const data = await resp.json();
-
-      if (!resp.ok) {
-        mostrarBanner('err', '<b>No se pudo cargar:</b> ' + (data.error || 'error desconocido'));
-      } else {
-        mostrarBanner(
-          'ok',
-          '<b>' + data.nombre + '</b> — plataforma <b>' + data.plataforma + '</b>: ' +
-          data.estudiantesCargados + ' estudiantes (' + data.estudiantesActivos + ' activos) y ' +
-          data.docentesCargados + ' docentes cargados.'
-        );
-        form.reset();
-        fileChip.style.display = 'none';
-        cargarColegios();
+    }).then(function (r) {
+      if (!r.ok) {
+        mostrarBanner(banner, 'err', '<b>No se pudo cargar:</b> ' + escapeHtml(r.datos.error || 'error desconocido'));
+        return;
       }
-    } catch (err) {
-      mostrarBanner('err', '<b>Error de red:</b> ' + err.message);
-    } finally {
-      btn.disabled = false;
-      btn.classList.remove('loading');
+      var d = r.datos;
+      mostrarBanner(banner, 'ok',
+        '<b>' + escapeHtml(d.nombre) + '</b> — ' + escapeHtml(d.plataforma) + ' ' + escapeHtml(d.periodo) + ': ' +
+        d.estudiantesCargados + ' estudiantes (' + d.estudiantesActivos + ' activos) y ' +
+        d.docentesCargados + ' docentes.');
+      var periodoPrevio = $('periodo').value;
+      formCarga.reset();
+      $('periodo').value = periodoPrevio; // el periodo suele repetirse entre cargas
+      refrescarProvincias(''); refrescarCantones('', '');
+      limpiarAutollenado();
+      fileChip.style.display = 'none';
+      cargarColegios();
+    }).catch(function (err) {
+      mostrarBanner(banner, 'err', '<b>Error de red:</b> ' + escapeHtml(err.message));
+    }).finally(function () {
+      btn.disabled = false; btn.classList.remove('loading');
       btnLabel.textContent = 'Cargar credenciales';
-    }
+    });
   });
 
-  async function cargarColegios() {
+  // ── Listado ─────────────────────────────────────────────────────────────
+  var listaEl = $('lista-colegios');
+  function cargarColegios() {
     listaEl.innerHTML = '<p class="empty-state">Cargando…</p>';
-    try {
-      const resp = await fetch('?listar=1');
-      const docs = await resp.json();
-      if (!Array.isArray(docs) || docs.length === 0) {
+    return api('?listar=1').then(function (r) {
+      if (!r.ok) { listaEl.innerHTML = '<p class="empty-state">No se pudo cargar el listado.</p>'; return; }
+      colegios = Array.isArray(r.datos) ? r.datos : [];
+      if (colegios.length === 0) {
         listaEl.innerHTML = '<p class="empty-state">Todavía no hay colegios cargados.</p>';
         return;
       }
-      const filas = docs.map((d) => (
-        '<tr><td>' + escapeHtml(d.nombre) + '<br><span style="color:var(--text-muted)">' +
-        escapeHtml(d.codigo || '') + '</span></td>' +
-        '<td>' + escapeHtml(d.ciudad || '-') + (d.canton ? ' / ' + escapeHtml(d.canton) : '') + '</td>' +
-        '<td>' + (d.plataformas || []).map((p) => '<span class="pill">' + escapeHtml(p) + '</span>').join('') + '</td>' +
-        '<td>' + d.estudiantesActivos + ' / ' + d.estudiantes + '</td>' +
-        '<td>' + d.docentes + '</td></tr>'
-      )).join('');
+      var filas = colegios.map(function (d) {
+        var pills = (d.plataformas || []).map(function (p) {
+          return '<span class="pill">' + escapeHtml(p) + '</span>';
+        }).join('') + (d.periodos || []).map(function (p) {
+          return '<span class="pill neutro">' + escapeHtml(p) + '</span>';
+        }).join('');
+        return '<tr><td>' + escapeHtml(d.nombre) + '<br><span style="color:var(--text-muted)">' +
+          escapeHtml(d.codigo || '') + '</span></td>' +
+          '<td>' + escapeHtml(d.canton || '-') + '<br><span style="color:var(--text-muted)">' +
+          escapeHtml(d.ciudad || '') + '</span></td>' +
+          '<td>' + (pills || '<span style="color:var(--text-muted)">—</span>') + '</td>' +
+          '<td>' + d.estudiantesActivos + ' / ' + d.estudiantes + '</td>' +
+          '<td>' + d.docentes + '</td></tr>';
+      }).join('');
       listaEl.innerHTML =
-        '<table><thead><tr><th>Colegio</th><th>Ubicación</th><th>Plataformas</th><th>Activos/Total</th><th>Docentes</th></tr></thead><tbody>' +
-        filas + '</tbody></table>';
-    } catch (err) {
+        '<table><thead><tr><th>Colegio</th><th>Ubicación</th><th>Plataformas y periodos</th>' +
+        '<th>Activos/Total</th><th>Docentes</th></tr></thead><tbody>' + filas + '</tbody></table>';
+    }).catch(function () {
       listaEl.innerHTML = '<p class="empty-state">No se pudo cargar el listado.</p>';
-    }
+    });
   }
+  $('btn-refrescar').addEventListener('click', cargarColegios);
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
-
-  btnRefrescar.addEventListener('click', cargarColegios);
-  cargarColegios();
+  // ── Arranque: reusa la sesión si sigue viva ─────────────────────────────
+  (function init() {
+    var guardado = null;
+    try { guardado = sessionStorage.getItem(LLAVE_TOKEN); } catch (err) { /* modo privado */ }
+    if (!guardado) return;
+    token = guardado;
+    api('?listar=1').then(function (r) {
+      if (r.ok) {
+        colegios = Array.isArray(r.datos) ? r.datos : [];
+        abrirApp();
+      }
+    }).catch(function () { /* token vencido: se queda en el login */ });
+  })();
 })();
 </script>
 </body>

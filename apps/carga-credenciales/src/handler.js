@@ -6,6 +6,7 @@ import { parsearExcelCredenciales } from './excel/parseExcel.js';
 import { coleccionColegios } from './db/mongo.js';
 import { normalizar } from './utils/similitud.js';
 import { cifrar } from './utils/cifrado.js';
+import { crearToken, verificarToken, tokenDeEvento, igualSeguro } from './utils/sesion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const paginaHtml = readFileSync(path.join(__dirname, 'public/index.html'), 'utf8');
@@ -61,6 +62,27 @@ export const handler = async (event) => {
       };
     }
 
+    // Login: entrega un token firmado que las peticiones de datos deben traer.
+    if (metodo === 'POST' && query.login) {
+      const credenciales = JSON.parse(
+        event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : event.body || '{}'
+      );
+      const usuarioOk = igualSeguro(credenciales.usuario, config.acceso.usuario);
+      const claveOk = igualSeguro(credenciales.clave, config.acceso.clave);
+      if (!usuarioOk || !claveOk) {
+        return respuestaJson(401, { error: 'Usuario o contraseña incorrectos' });
+      }
+      return respuestaJson(200, {
+        token: crearToken(config.acceso.usuario, config.cifrado.clave),
+        usuario: config.acceso.usuario,
+      });
+    }
+
+    // A partir de aquí todo expone o modifica datos de colegios: exige sesión.
+    if (!verificarToken(tokenDeEvento(event), config.cifrado.clave)) {
+      return respuestaJson(401, { error: 'Sesión inválida o expirada' });
+    }
+
     if (metodo === 'GET' && query.listar) {
       const col = await coleccionColegios();
       const docs = await col
@@ -76,6 +98,7 @@ export const handler = async (event) => {
           ciudad: d.ciudad,
           canton: d.canton,
           plataformas: [...new Set([...(d.estudiantes || []), ...(d.docentes || [])].map((r) => r.plataforma).filter(Boolean))],
+          periodos: [...new Set([...(d.estudiantes || []), ...(d.docentes || [])].map((r) => r.periodo).filter(Boolean))].sort(),
           estudiantes: (d.estudiantes || []).length,
           estudiantesActivos: contarActivos(d.estudiantes),
           docentes: (d.docentes || []).length,
@@ -92,7 +115,7 @@ export const handler = async (event) => {
     const { idColegio, codigoColegio, nombreColegio, region, canton, archivoBase64, nombreArchivo } = body;
     const ciudad = body.ciudad || body.provincia; // "Ciudad (Provincia)": se aceptan ambos nombres
 
-    const faltantes = ['idColegio', 'codigoColegio', 'nombreColegio', 'plataforma', 'archivoBase64'].filter(
+    const faltantes = ['idColegio', 'codigoColegio', 'nombreColegio', 'plataforma', 'periodo', 'archivoBase64'].filter(
       (campo) => !body[campo]
     );
     if (faltantes.length > 0) {
@@ -106,6 +129,11 @@ export const handler = async (event) => {
       });
     }
 
+    const periodo = String(body.periodo).trim();
+    if (!/^\d{4}-\d{4}$/.test(periodo)) {
+      return respuestaJson(400, { error: `Periodo "${body.periodo}" inválido. Formato esperado: 2026-2027` });
+    }
+
     if (nombreArchivo && !/\.(xlsx|xlsm|xltx|xltm)$/i.test(nombreArchivo)) {
       return respuestaJson(400, { error: 'El archivo debe ser Excel (.xlsx)' });
     }
@@ -113,12 +141,13 @@ export const handler = async (event) => {
     const buffer = Buffer.from(archivoBase64, 'base64');
     const datos = parsearExcelCredenciales(buffer);
 
-    // Marca plataforma + activo (activo = tiene PIN asociado) y cifra las
-    // credenciales antes de tocar la base.
+    // Marca plataforma + periodo + activo (activo = tiene PIN asociado) y cifra
+    // las credenciales antes de tocar la base.
     const preparar = (registros) =>
       registros.map((r) => ({
         ...r,
         plataforma,
+        periodo,
         activo: Boolean(r.pin && String(r.pin).trim() !== ''),
         login: cifrar(r.login, config.cifrado.clave),
         contrasena: cifrar(r.contrasena, config.cifrado.clave),
@@ -130,10 +159,19 @@ export const handler = async (event) => {
 
     const col = await coleccionColegios();
 
-    // Carga progresiva: conserva los registros de las OTRAS plataformas y
-    // reemplaza solo los de la plataforma de esta carga.
+    // Carga progresiva: esta carga reemplaza únicamente los registros de la
+    // MISMA plataforma Y el MISMO periodo; todo lo demás se conserva.
     const existente = await col.findOne({ _id: idColegio });
-    const conservarOtras = (lista = []) => lista.filter((r) => r.plataforma && r.plataforma !== plataforma);
+    const conservarOtras = (lista = []) =>
+      lista.filter((r) => {
+        if (!r.plataforma) return false; // registro previo sin plataforma: se descarta
+        if (r.plataforma !== plataforma) return true; // otra plataforma: intacto
+        // Misma plataforma sin periodo = dato anterior a que existiera el campo;
+        // esta carga lo sustituye para no dejarlo huérfano (nunca coincidiría
+        // con ningún periodo y se acumularía para siempre).
+        if (!r.periodo) return false;
+        return r.periodo !== periodo;
+      });
 
     const docentes = [...conservarOtras(existente?.docentes), ...nuevosDocentes];
     const estudiantes = [...conservarOtras(existente?.estudiantes), ...nuevosEstudiantes];
@@ -171,6 +209,7 @@ export const handler = async (event) => {
       ciudad: ciudad || 'n/a',
       canton: canton || 'n/a',
       plataforma,
+      periodo,
       hojasProcesadas: datos.hojasProcesadas,
       docentesCargados: nuevosDocentes.length,
       estudiantesCargados: nuevosEstudiantes.length,

@@ -10,7 +10,6 @@ const CAMPOS = {
   nombre: ['nombre', 'nombres'],
   login: ['login', 'usuario', 'user', 'username'],
   contrasena: ['contrasena', 'contraseña', 'password', 'clave', 'pass'],
-  pin: ['pin', 'pin de acceso', 'codigo pin', 'pin asociado', 'pin estudiante'],
 };
 
 function mapearEncabezados(filaEncabezados) {
