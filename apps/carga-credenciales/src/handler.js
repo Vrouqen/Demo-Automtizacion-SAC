@@ -1,8 +1,14 @@
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import { config, validarConfig } from './config.js';
 import { parsearExcelCredenciales } from './excel/parseExcel.js';
 import { coleccionColegios } from './db/mongo.js';
 import { normalizar } from './utils/similitud.js';
 import { cifrar } from './utils/cifrado.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const paginaHtml = readFileSync(path.join(__dirname, 'public/index.html'), 'utf8');
 
 function respuestaJson(statusCode, cuerpo) {
   return {
@@ -36,6 +42,7 @@ function contarActivos(estudiantes = []) {
  * Login, contraseña y PIN se cifran (AES-256-GCM) antes de guardarse en Mongo.
  * Un estudiante queda marcado como "activo" si su fila trae PIN asociado.
  *
+ * GET / (sin query params) -> sirve el formulario web de carga.
  * GET ?listar=1 -> lista los colegios cargados (sin credenciales), con conteo
  * de estudiantes activos y plataformas cargadas.
  */
@@ -45,6 +52,14 @@ export const handler = async (event) => {
 
     const metodo = event.requestContext?.http?.method || 'POST';
     const query = event.queryStringParameters || {};
+
+    if (metodo === 'GET' && !query.listar) {
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: paginaHtml,
+      };
+    }
 
     if (metodo === 'GET' && query.listar) {
       const col = await coleccionColegios();

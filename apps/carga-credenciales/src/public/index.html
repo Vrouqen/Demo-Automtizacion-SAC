@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Carga de Credenciales SAC</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --border: #e2e4e9;
+    --text: #1c1e26;
+    --text-muted: #6b7280;
+    --accent: #d94f27;
+    --accent-dark: #b83e1c;
+    --accent-soft: #fdece6;
+    --ok: #1a7f4e;
+    --ok-soft: #e8f7ef;
+    --err: #c0392b;
+    --err-soft: #fdecea;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 16px rgba(16, 24, 40, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161c;
+      --card: #1c1f27;
+      --border: #2c3040;
+      --text: #eceef2;
+      --text-muted: #9aa1b1;
+      --accent: #ff7a52;
+      --accent-dark: #ff5a2a;
+      --accent-soft: #3a2420;
+      --ok: #3ecf8e;
+      --ok-soft: #103326;
+      --err: #ff6b6b;
+      --err-soft: #3a1f1f;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 20px 64px;
+  }
+  header.top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .logo-mark {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 700;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  header.top h1 {
+    font-size: 20px;
+    margin: 0;
+    line-height: 1.25;
+  }
+  header.top p {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 28px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    font-size: 15px;
+    margin: 0 0 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field.full { grid-column: 1 / -1; }
+  label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  input[type="text"], select {
+    appearance: none;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    color: var(--text);
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  input[type="text"]:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .platform-toggle {
+    display: flex;
+    gap: 10px;
+  }
+  .platform-toggle label {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    background: var(--bg);
+  }
+  .platform-toggle input { accent-color: var(--accent); }
+  .platform-toggle label:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+  }
+  .dropzone {
+    border: 1.5px dashed var(--border);
+    border-radius: 10px;
+    padding: 22px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13.5px;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
+  .dropzone strong { color: var(--text); }
+  .dropzone input { display: none; }
+  .file-chip {
+    margin-top: 10px;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+    border-radius: 8px;
+    padding: 8px 12px;
+    width: fit-content;
+  }
+  button.submit {
+    width: 100%;
+    margin-top: 22px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 9px;
+    padding: 13px 16px;
+    font-size: 14.5px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background .15s ease, opacity .15s ease;
+  }
+  button.submit:hover { background: var(--accent-dark); }
+  button.submit:disabled { opacity: .6; cursor: not-allowed; }
+  .spinner {
+    width: 15px; height: 15px;
+    border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: none;
+  }
+  button.submit.loading .spinner { display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .banner {
+    display: none;
+    border-radius: 9px;
+    padding: 12px 14px;
+    font-size: 13.5px;
+    margin-top: 16px;
+    gap: 8px;
+    align-items: flex-start;
+    line-height: 1.45;
+  }
+  .banner.show { display: flex; }
+  .banner.ok { background: var(--ok-soft); color: var(--ok); }
+  .banner.err { background: var(--err-soft); color: var(--err); }
+  .banner b { color: inherit; }
+  .link-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 13.5px;
+    cursor: pointer;
+    padding: 0;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+    margin-right: 4px;
+  }
+  .empty-state { color: var(--text-muted); font-size: 13.5px; text-align: center; padding: 12px 0; }
+  footer {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 32px;
+    line-height: 1.7;
+  }
+  footer .brand { font-weight: 600; color: var(--text); }
+  @media (max-width: 560px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div class="logo-mark">SAC</div>
+    <div>
+      <h1>Carga de Credenciales</h1>
+      <p>Sube el Excel de un colegio y guárdalo cifrado en la base de datos.</p>
+    </div>
+  </header>
+
+  <form class="card" id="form-carga">
+    <h2>Datos del colegio</h2>
+    <div class="grid">
+      <div class="field">
+        <label for="idColegio">Id Colegio (Pegasus)</label>
+        <input type="text" id="idColegio" name="idColegio" placeholder="COL-001" required />
+      </div>
+      <div class="field">
+        <label for="codigoColegio">Código colegio</label>
+        <input type="text" id="codigoColegio" name="codigoColegio" placeholder="UE-QUITO-01" required />
+      </div>
+      <div class="field">
+        <label for="region">Región</label>
+        <select id="region" name="region">
+          <option value="">Seleccionar…</option>
+          <option>Costa</option>
+          <option>Sierra</option>
+          <option>Oriente</option>
+          <option>Insular</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="ciudad">Ciudad (Provincia)</label>
+        <input type="text" id="ciudad" name="ciudad" placeholder="Pichincha" />
+      </div>
+      <div class="field">
+        <label for="canton">Cantón</label>
+        <input type="text" id="canton" name="canton" placeholder="Quito" />
+      </div>
+      <div class="field">
+        <label for="nombreColegio">Nombre de colegio (del avance)</label>
+        <input type="text" id="nombreColegio" name="nombreColegio" placeholder="Unidad Educativa San Francisco de Quito" required />
+      </div>
+    </div>
+
+    <h2 style="margin-top:24px">Plataforma</h2>
+    <div class="platform-toggle">
+      <label><input type="radio" name="plataforma" value="compartir" checked /> Compartir</label>
+      <label><input type="radio" name="plataforma" value="creo" /> CREO</label>
+    </div>
+
+    <h2 style="margin-top:24px">Archivo de credenciales</h2>
+    <label class="dropzone" id="dropzone" for="archivo">
+      <span><strong>Haz clic para elegir</strong> o arrastra aquí el Excel (.xlsx)</span>
+      <input type="file" id="archivo" name="archivo" accept=".xlsx,.xlsm,.xltx,.xltm" required />
+    </label>
+    <div class="file-chip" id="file-chip"></div>
+
+    <button class="submit" id="btn-submit" type="submit">
+      <span class="spinner"></span>
+      <span id="btn-label">Cargar credenciales</span>
+    </button>
+
+    <div class="banner" id="banner"></div>
+  </form>
+
+  <section class="card">
+    <h2>Colegios cargados <button type="button" class="link-btn" id="btn-refrescar" style="margin-left:auto">Actualizar</button></h2>
+    <div id="lista-colegios"><p class="empty-state">Cargando…</p></div>
+  </section>
+
+  <footer>
+    <div class="brand">Tecnología Educativa Ecuador</div>
+    <div>Quito, Ecuador — Santillana</div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  const form = document.getElementById('form-carga');
+  const dropzone = document.getElementById('dropzone');
+  const input = document.getElementById('archivo');
+  const fileChip = document.getElementById('file-chip');
+  const btn = document.getElementById('btn-submit');
+  const btnLabel = document.getElementById('btn-label');
+  const banner = document.getElementById('banner');
+  const listaEl = document.getElementById('lista-colegios');
+  const btnRefrescar = document.getElementById('btn-refrescar');
+
+  ['dragover', 'dragenter'].forEach((ev) =>
+    dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.add('drag'); })
+  );
+  ['dragleave', 'drop'].forEach((ev) =>
+    dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.remove('drag'); })
+  );
+  dropzone.addEventListener('drop', (e) => {
+    const f = e.dataTransfer.files[0];
+    if (f) { input.files = e.dataTransfer.files; mostrarArchivo(f); }
+  });
+  input.addEventListener('change', () => { if (input.files[0]) mostrarArchivo(input.files[0]); });
+
+  function mostrarArchivo(f) {
+    fileChip.style.display = 'flex';
+    fileChip.textContent = f.name + ' · ' + (f.size / 1024).toFixed(0) + ' KB';
+  }
+
+  function mostrarBanner(tipo, html) {
+    banner.className = 'banner show ' + tipo;
+    banner.innerHTML = html;
+  }
+
+  function leerArchivoBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const file = input.files[0];
+    if (!file) return;
+
+    btn.disabled = true;
+    btn.classList.add('loading');
+    btnLabel.textContent = 'Cargando…';
+    banner.className = 'banner';
+
+    try {
+      const archivoBase64 = await leerArchivoBase64(file);
+      const body = {
+        idColegio: form.idColegio.value.trim(),
+        codigoColegio: form.codigoColegio.value.trim(),
+        region: form.region.value,
+        ciudad: form.ciudad.value.trim(),
+        canton: form.canton.value.trim(),
+        nombreColegio: form.nombreColegio.value.trim(),
+        plataforma: form.plataforma.value,
+        nombreArchivo: file.name,
+        archivoBase64,
+      };
+
+      const resp = await fetch('', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        mostrarBanner('err', '<b>No se pudo cargar:</b> ' + (data.error || 'error desconocido'));
+      } else {
+        mostrarBanner(
+          'ok',
+          '<b>' + data.nombre + '</b> — plataforma <b>' + data.plataforma + '</b>: ' +
+          data.estudiantesCargados + ' estudiantes (' + data.estudiantesActivos + ' activos) y ' +
+          data.docentesCargados + ' docentes cargados.'
+        );
+        form.reset();
+        fileChip.style.display = 'none';
+        cargarColegios();
+      }
+    } catch (err) {
+      mostrarBanner('err', '<b>Error de red:</b> ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('loading');
+      btnLabel.textContent = 'Cargar credenciales';
+    }
+  });
+
+  async function cargarColegios() {
+    listaEl.innerHTML = '<p class="empty-state">Cargando…</p>';
+    try {
+      const resp = await fetch('?listar=1');
+      const docs = await resp.json();
+      if (!Array.isArray(docs) || docs.length === 0) {
+        listaEl.innerHTML = '<p class="empty-state">Todavía no hay colegios cargados.</p>';
+        return;
+      }
+      const filas = docs.map((d) => (
+        '<tr><td>' + escapeHtml(d.nombre) + '<br><span style="color:var(--text-muted)">' +
+        escapeHtml(d.codigo || '') + '</span></td>' +
+        '<td>' + escapeHtml(d.ciudad || '-') + (d.canton ? ' / ' + escapeHtml(d.canton) : '') + '</td>' +
+        '<td>' + (d.plataformas || []).map((p) => '<span class="pill">' + escapeHtml(p) + '</span>').join('') + '</td>' +
+        '<td>' + d.estudiantesActivos + ' / ' + d.estudiantes + '</td>' +
+        '<td>' + d.docentes + '</td></tr>'
+      )).join('');
+      listaEl.innerHTML =
+        '<table><thead><tr><th>Colegio</th><th>Ubicación</th><th>Plataformas</th><th>Activos/Total</th><th>Docentes</th></tr></thead><tbody>' +
+        filas + '</tbody></table>';
+    } catch (err) {
+      listaEl.innerHTML = '<p class="empty-state">No se pudo cargar el listado.</p>';
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  btnRefrescar.addEventListener('click', cargarColegios);
+  cargarColegios();
+})();
+</script>
+</body>
+</html>
