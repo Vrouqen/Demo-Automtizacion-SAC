@@ -46,7 +46,7 @@ Luego **Elastic IPs → Allocate → Associate** con la instancia (para que la I
 > pagar NAT Gateway) y sus IPs de salida cambian, así que no se puede restringir por IP. Mitigaciones
 > obligatorias: autenticación con contraseña fuerte (paso 4), TLS (paso 3) y, además, las
 > credenciales de estudiantes ya viajan **cifradas a nivel de campo** (AES-256-GCM) — aunque alguien
-> lograra leer la base, no ve logins/contraseñas/PINs. Si prefieren cerrar 27017, la alternativa es
+> lograra leer la base, no ve logins ni contraseñas. Si prefieren cerrar 27017, la alternativa es
 > mover las Lambdas a la VPC y pagar el NAT Gateway (~$32/mes).
 
 ### 2. Instalar Docker Engine

@@ -27,7 +27,7 @@ function parsearBody(event) {
  *                                    (si no viene "codigo", se extrae CASO-XXXXXX del asunto)
  * GET  /?reporte=analitica           analítica agregada del piloto
  * GET  /?reporte=estudiantes_activos&idColegio=<id Pegasus>
- *                                    cantidad de estudiantes activos (activo = tiene PIN)
+ *                                    cantidad de estudiantes activos (activo = tiene credenciales)
  */
 export const handler = async (event) => {
   try {

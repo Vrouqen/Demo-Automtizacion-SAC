@@ -25,9 +25,11 @@ cerebro: Gemini + function calling decide la intención:
                                     con región/ciudad/cantón para separar colegios HOMÓNIMOS)
   - derivar_a_agente_digital     → crea un caso [CASO-XXXXXX] y lo asigna (round-robin) a un
                                     agente digital de servicio (lista en AGENTES_DIGITALES)
-  - consultar_estudiantes_activos → estudiantes activos de un colegio (activo = tiene PIN)
+  - consultar_estudiantes_activos → estudiantes activos de un colegio (activo = tiene credenciales)
   - crear_ticket                 → registra el ticket en Mongo (Jira real en standby)
-  - info_pin                     → respuesta fija (reverso del libro "Compartir")
+  - info_pin                     → mini tutorial de dónde está el PIN (impreso en el reverso del
+                                    libro "Compartir"; no tiene relación con las credenciales
+                                    cargadas por Excel)
   - fuera_de_alcance             → respuesta fija de cortesía
         ↓
 n8n Switch según "accion":
@@ -104,7 +106,8 @@ mismo hilo (lo usa el flujo 2 de n8n).
 escalamientos), total de conversaciones.
 
 **`GET /?reporte=estudiantes_activos&idColegio=<id Pegasus>`** — cantidad de estudiantes activos del
-colegio (**activo = tiene PIN asociado**), con desglose por plataforma (Compartir/CREO).
+colegio (**activo = tiene credenciales cargadas**, es decir login y contraseña), con desglose por
+plataforma (Compartir/CREO).
 
 ### Funciones que maneja el LLM
 
@@ -120,9 +123,11 @@ colegio (**activo = tiene PIN asociado**), con desglose por plataforma (Comparti
   al cliente se le avisa en su mismo hilo. Cuando el agente responde, su respuesta vuelve al cliente
   **por el hilo del correo inicial** (flujo 2 de n8n).
 - **Estudiantes activos**: consulta por id de Pegasus o nombre de colegio cuántos estudiantes
-  activos tiene (activo = con PIN).
+  activos tiene (activo = con credenciales cargadas).
 - **Reseteo de contraseña**: **siempre** genera un ticket (nunca lo resuelve el LLM directamente).
-- **PIN de acceso**: respuesta fija (reverso del libro "Compartir").
+- **PIN de acceso**: toda consulta se responde con un **mini tutorial** de dónde encontrarlo (está
+  impreso en el reverso del libro "Compartir"). Es el PIN del libro físico — no tiene relación con
+  las credenciales que se cargan por Excel. No hay forma automática de validar un PIN.
 - **Incidencias de plataforma**: genera un ticket para el equipo de servicio digital.
 - **Fuera de alcance**: responde amablemente que no aplica.
 
@@ -135,9 +140,25 @@ en Mongo con `estado: "pendiente_jira"` (ver el `TODO` en `apps/cerebro/src/serv
 
 ## `apps/carga-credenciales`
 
-Sube un Excel de credenciales (pestañas **Docentes** y/o **Estudiantes**) a Mongo. La carga es
-**progresiva por plataforma**: cada POST reemplaza solo las credenciales de la plataforma indicada
-para ese colegio y conserva las de la otra. **Solo se aceptan credenciales de `compartir` y `creo`.**
+Sube un Excel de credenciales de **estudiantes** a Mongo, desde un formulario web o por API. Hace una
+sola cosa: cargar credenciales a la base. **Solo se aceptan credenciales de `compartir` y `creo`.**
+
+**Solo estudiantes**: si el Excel trae una pestaña **Docentes**, se ignora a propósito (el programa
+ya no gestiona credenciales de docentes) y la respuesta lo informa en `hojasIgnoradas`. Un archivo
+que *solo* tenga pestaña de Docentes se rechaza con error 400, para no cargar profesores como si
+fueran alumnos.
+
+**Carga progresiva por plataforma y periodo**: cada POST toca solo los registros de esa
+plataforma+periodo y deja intactos los demás. Dentro de ellos **fusiona por persona** (identificada
+por su login, o por su nombre completo si la fila no trae login): a quien ya existía se le actualizan
+sus credenciales y a quien no, se le agrega. **No borra a quien no venga en el archivo**, así que una
+carga parcial es segura.
+
+**`GET /`** (sin query params) — formulario web. Pide usuario/contraseña (`APP_USUARIO`/`APP_CLAVE`),
+encadena región → provincia → cantón, y autocompleta los datos de los colegios ya registrados.
+
+**`POST /?login=1`** — body `{ usuario, clave }` → devuelve un token de sesión firmado (HMAC, 8 h).
+Las demás rutas de datos exigen `Authorization: Bearer <token>`.
 
 **`POST /`** — body JSON:
 ```json
@@ -149,6 +170,7 @@ para ese colegio y conserva las de la otra. **Solo se aceptan credenciales de `c
   "canton": "Quito",
   "nombreColegio": "Unidad Educativa San Francisco de Quito",
   "plataforma": "compartir",
+  "periodo": "2026-2027",
   "nombreArchivo": "credenciales.xlsx",
   "archivoBase64": "<contenido del .xlsx en base64>"
 }
@@ -156,18 +178,24 @@ para ese colegio y conserva las de la otra. **Solo se aceptan credenciales de `c
 - `idColegio` = id del colegio en **Pegasus**; `nombreColegio` = nombre **del avance**;
   `ciudad` = Ciudad (Provincia) — se acepta también la clave `provincia`.
 - `plataforma` es obligatoria y solo acepta `compartir` o `creo`.
+- `periodo` es obligatorio, con formato `AAAA-AAAA` (ej. `2026-2027`).
 - Columnas del Excel (el orden no importa, se detectan por nombre): `Grado | Grupo |
-  Apellido Paterno | Apellido Materno | Nombre | Login | Contraseña | PIN`. La columna PIN es
-  opcional: si la fila trae PIN, el estudiante queda marcado como **activo**.
-- **Login, contraseña y PIN se cifran (AES-256-GCM) antes de guardarse en Mongo** con la clave
+  Apellido Paterno | Apellido Materno | Nombre | Login | Contraseña`.
+- **Login y contraseña se cifran (AES-256-GCM) antes de guardarse en Mongo** con la clave
   `CREDENCIALES_ENC_KEY` (la misma que usa el cerebro para descifrar al responder).
+- La respuesta trae `estudiantes: { filas, nuevos, actualizados, sinCambios, totalPeriodo,
+  totalColegio }` y `hojasIgnoradas`.
 
 **`GET /?listar=1`** — lista los colegios cargados (sin credenciales), con región/ciudad/cantón,
-plataformas cargadas y conteo de estudiantes activos.
+plataformas y periodos cargados, y cantidad de estudiantes.
+
+> Esta app **solo sube credenciales**: no calcula ni muestra estados. Quién está activo lo deduce el
+> cerebro al consultar (`?reporte=estudiantes_activos`), a partir de si el estudiante tiene
+> credenciales cargadas.
 
 ## Seguridad
 
-- **Credenciales cifradas en reposo**: login, contraseña y PIN se guardan cifrados (AES-256-GCM,
+- **Credenciales cifradas en reposo**: login y contraseña se guardan cifrados (AES-256-GCM,
   clave de 32 bytes en `CREDENCIALES_ENC_KEY`, la misma en ambas Lambdas). El cerebro descifra solo
   al momento de responder a las cuentas de soporte autorizadas. Si se pierde la clave, hay que
   volver a cargar los Excels. Datos cargados antes del cifrado siguen siendo legibles

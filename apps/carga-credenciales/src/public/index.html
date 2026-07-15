@@ -672,11 +672,18 @@
         mostrarBanner(banner, 'err', '<b>No se pudo cargar:</b> ' + escapeHtml(r.datos.error || 'error desconocido'));
         return;
       }
-      var d = r.datos;
+      var e = r.datos.estudiantes;
+      var partes = [];
+      if (e.nuevos) partes.push('<b>' + e.nuevos + '</b> nuevos');
+      if (e.actualizados) partes.push('<b>' + e.actualizados + '</b> con credenciales actualizadas');
+      if (e.sinCambios) partes.push(e.sinCambios + ' sin cambios');
+      var ignoradas = (r.datos.hojasIgnoradas || []).length
+        ? ' Se ignoraron las pestañas: ' + escapeHtml(r.datos.hojasIgnoradas.join(', ')) + '.'
+        : '';
       mostrarBanner(banner, 'ok',
-        '<b>' + escapeHtml(d.nombre) + '</b> — ' + escapeHtml(d.plataforma) + ' ' + escapeHtml(d.periodo) + ': ' +
-        d.estudiantesCargados + ' estudiantes (' + d.estudiantesActivos + ' activos) y ' +
-        d.docentesCargados + ' docentes.');
+        '<b>' + escapeHtml(r.datos.nombre) + '</b> — ' + escapeHtml(r.datos.plataforma) + ' ' +
+        escapeHtml(r.datos.periodo) + ': ' + (partes.join(', ') || 'sin registros en el archivo') +
+        '. Total del periodo: ' + e.totalPeriodo + ' estudiantes.' + ignoradas);
       var periodoPrevio = $('periodo').value;
       formCarga.reset();
       $('periodo').value = periodoPrevio; // el periodo suele repetirse entre cargas
@@ -714,12 +721,11 @@
           '<td>' + escapeHtml(d.canton || '-') + '<br><span style="color:var(--text-muted)">' +
           escapeHtml(d.ciudad || '') + '</span></td>' +
           '<td>' + (pills || '<span style="color:var(--text-muted)">—</span>') + '</td>' +
-          '<td>' + d.estudiantesActivos + ' / ' + d.estudiantes + '</td>' +
-          '<td>' + d.docentes + '</td></tr>';
+          '<td>' + d.estudiantes + '</td></tr>';
       }).join('');
       listaEl.innerHTML =
         '<table><thead><tr><th>Colegio</th><th>Ubicación</th><th>Plataformas y periodos</th>' +
-        '<th>Activos/Total</th><th>Docentes</th></tr></thead><tbody>' + filas + '</tbody></table>';
+        '<th>Estudiantes</th></tr></thead><tbody>' + filas + '</tbody></table>';
     }).catch(function () {
       listaEl.innerHTML = '<p class="empty-state">No se pudo cargar el listado.</p>';
     });

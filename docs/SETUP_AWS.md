@@ -47,7 +47,7 @@ whitelistear** en Atlas.
 
 En **MongoDB Atlas → tu proyecto → Network Access → Add IP Address → Allow Access from Anywhere
 (`0.0.0.0/0`)**. La seguridad la sigue dando el usuario/contraseña del connection string y, dentro de
-Mongo, el cifrado de campo de login/contraseña/PIN (mismo razonamiento que el puerto 27017 abierto en
+Mongo, el cifrado de campo de login/contraseña (mismo razonamiento que el puerto 27017 abierto en
 la opción EC2 de `MIGRACION_MONGO_AWS.md`).
 
 Si dejas Atlas con una IP específica whitelisteada (ej. la tuya de casa), las Lambdas se conectarán
@@ -249,7 +249,7 @@ aws lambda create-function --function-name carga-credenciales-sac --package-type
 **Camino simple (recomendado para el piloto):** pega los valores directo en cada función.
 
 Antes de configurar, **genera la clave de cifrado de credenciales** (32 bytes en base64 — cifra
-login/contraseña/PIN dentro de Mongo; debe ser LA MISMA en ambas Lambdas):
+login/contraseña dentro de Mongo; debe ser LA MISMA en ambas Lambdas):
 
 ```powershell
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
@@ -275,8 +275,15 @@ volver a subir los Excels).
    - `JIRA_HABILITADO` = `false`
 3. **Save**.
 4. En `carga-credenciales-sac` → mismo camino, necesita `MONGODB_URI`, `MONGODB_DB`,
-   `MONGODB_COLLECTION_COLEGIOS` = `colegios` y `CREDENCIALES_ENC_KEY` (la MISMA clave que en
-   `cerebro-sac`).
+   `MONGODB_COLLECTION_COLEGIOS` = `colegios`, `CREDENCIALES_ENC_KEY` (la MISMA clave que en
+   `cerebro-sac`) y, para el formulario web:
+   - `APP_USUARIO` = `sac_app`
+   - `APP_CLAVE` = la contraseña de acceso al formulario (ej. `SacApp2026!`)
+
+> ⚠️ `APP_CLAVE` es **obligatoria**: si falta, la función responde error en vez de servir el
+> formulario. Es a propósito — la Function URL es pública (`Auth type: NONE`), así que sin esa clave
+> el endpoint quedaría abierto a internet. El login se valida en el servidor y entrega un token
+> firmado (HMAC, válido 8 horas) que exigen `POST /` y `GET ?listar=1`.
 
 > Esto deja el valor plano visible en esa pantalla para quien tenga permiso de leer la función —
 > aceptable para un piloto interno. Si prefieres no exponerlo ahí, usa el camino con SSM de abajo.
@@ -372,37 +379,56 @@ curl.exe -X POST "https://TU-URL-CEREBRO.lambda-url.us-east-2.on.aws/" -H "conte
 Invoke-RestMethod -Method Get -Uri "https://TU-URL-CEREBRO.lambda-url.us-east-2.on.aws/?reporte=analitica"
 ```
 
-**Estudiantes activos de un colegio** (activo = tiene PIN asociado; `idColegio` es el id de Pegasus):
+**Estudiantes activos de un colegio** (activo = tiene credenciales cargadas; `idColegio` es el id de Pegasus):
 
 ```powershell
 Invoke-RestMethod -Method Get -Uri "https://TU-URL-CEREBRO.lambda-url.us-east-2.on.aws/?reporte=estudiantes_activos&idColegio=COL-001"
 ```
 
-**Carga de credenciales — formulario web**: abre la Function URL de `carga-credenciales-sac`
-directo en el navegador (sin nada después de la `/`) y verás un formulario para subir el Excel sin
-necesidad de terminal ni Postman. `?listar=1` (usado por la sección "Colegios cargados" del propio
-formulario) sigue devolviendo JSON puro.
+**Carga de credenciales — formulario web (lo normal)**: abre la Function URL de
+`carga-credenciales-sac` directo en el navegador (sin nada después de la `/`). Pide usuario y
+contraseña (`APP_USUARIO` / `APP_CLAVE` del paso 6) y luego permite subir el Excel sin terminal ni
+Postman: busca el colegio por nombre (tolera errores de tipeo), autocompleta sus datos si ya está
+registrado, y encadena región → provincia → cantón.
 
-**Carga de credenciales — vía API** (convierte el Excel a base64 primero; `plataforma` solo acepta
-`compartir` o `creo`):
+**Carga de credenciales — vía API** (para automatizar). Primero autentícate y guarda el token; toda
+petición de datos lo necesita:
 
 ```powershell
+$login = Invoke-RestMethod -Method Post -Uri "https://TU-URL-CARGA.lambda-url.us-east-2.on.aws/?login=1" -ContentType "application/json" -Body (@{ usuario = "sac_app"; clave = "TU_APP_CLAVE" } | ConvertTo-Json)
+$headers = @{ Authorization = "Bearer $($login.token)" }
+
 $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("credenciales.xlsx"))
 
 $body = @{
   idColegio = "COL-001"                 # id del colegio en Pegasus
   codigoColegio = "UE-QUITO-01"
-  region = "Sierra"
+  region = "Sierra"                     # solo "Costa" o "Sierra"
   ciudad = "Pichincha"                  # Ciudad (Provincia)
   canton = "Quito"
   nombreColegio = "Unidad Educativa San Francisco de Quito"   # nombre del avance
-  plataforma = "compartir"              # o "creo" — la carga es progresiva por plataforma
+  plataforma = "compartir"              # o "creo"
+  periodo = "2026-2027"                 # periodo escolar (formato AAAA-AAAA)
   nombreArchivo = "credenciales.xlsx"
   archivoBase64 = $b64
 } | ConvertTo-Json
 
-Invoke-RestMethod -Method Post -Uri "https://TU-URL-CARGA.lambda-url.us-east-2.on.aws/" -ContentType "application/json" -Body $body
+Invoke-RestMethod -Method Post -Uri "https://TU-URL-CARGA.lambda-url.us-east-2.on.aws/" -ContentType "application/json" -Headers $headers -Body $body
+
+# Listado de colegios cargados (también requiere el token)
+Invoke-RestMethod -Uri "https://TU-URL-CARGA.lambda-url.us-east-2.on.aws/?listar=1" -Headers $headers
 ```
+
+> La carga es **progresiva por plataforma y periodo**: subir `compartir 2026-2027` solo toca esos
+> registros y deja intactos los de `creo` o los de otros periodos del mismo colegio.
+>
+> Dentro de esa plataforma+periodo la carga **fusiona por persona** (identificada por su login, o por
+> su nombre completo si la fila no trae login): a quien ya existía se le actualizan sus credenciales
+> y a quien no, se le agrega. **No se borra a nadie que no venga en el archivo**, así que una carga
+> parcial (por ejemplo, solo los alumnos a los que les cambió la contraseña) es segura. La respuesta
+> lo detalla en `estudiantes`: `nuevos`, `actualizados` (ya existían y su contraseña cambió),
+> `sinCambios`, `totalPeriodo` y `totalColegio`, más `hojasIgnoradas` (las pestañas que quedaron
+> fuera, típicamente "Docentes").
 
 Si algo falla, revisa los logs: en la consola, entra a la función → pestaña **Monitor → View
 CloudWatch logs** → el log más reciente muestra el error exacto.

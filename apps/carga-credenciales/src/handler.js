@@ -5,7 +5,7 @@ import { config, validarConfig } from './config.js';
 import { parsearExcelCredenciales } from './excel/parseExcel.js';
 import { coleccionColegios } from './db/mongo.js';
 import { normalizar } from './utils/similitud.js';
-import { cifrar } from './utils/cifrado.js';
+import { cifrar, descifrar } from './utils/cifrado.js';
 import { crearToken, verificarToken, tokenDeEvento, igualSeguro } from './utils/sesion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,33 +19,37 @@ function respuestaJson(statusCode, cuerpo) {
   };
 }
 
-function contarActivos(estudiantes = []) {
-  return estudiantes.filter((e) => e.activo).length;
-}
-
 /**
- * Lambda expuesta vía Function URL. Permite cargar credenciales de forma
- * progresiva: cada POST reemplaza solo las credenciales de LA PLATAFORMA
- * indicada para ese colegio; las de la otra plataforma se conservan.
+ * Lambda expuesta vía Function URL. Carga credenciales de ESTUDIANTES de forma
+ * progresiva: cada POST toca solo los registros de la plataforma y el periodo
+ * indicados, y dentro de ellos fusiona por persona (actualiza a quien ya existía
+ * y agrega a quien no), sin borrar a los que no vengan en el archivo.
+ *
+ * Solo estudiantes: si el Excel trae una pestaña "Docentes" se ignora — el
+ * programa ya no gestiona credenciales de docentes.
  *
  * POST body (JSON):
  *   {
  *     idColegio,        // Id del colegio (id de Pegasus)
  *     codigoColegio,    // Código del colegio
- *     region,           // Región (Costa / Sierra / Oriente / Insular)
+ *     region,           // Región (Costa / Sierra)
  *     ciudad,           // Ciudad (Provincia) — se acepta también "provincia"
  *     canton,           // Cantón
  *     nombreColegio,    // Nombre del colegio (del avance)
  *     plataforma,       // OBLIGATORIO: solo "compartir" o "creo"
+ *     periodo,          // OBLIGATORIO: periodo escolar, formato "2026-2027"
  *     nombreArchivo, archivoBase64
  *   }
  *
- * Login, contraseña y PIN se cifran (AES-256-GCM) antes de guardarse en Mongo.
- * Un estudiante queda marcado como "activo" si su fila trae PIN asociado.
+ * Login y contraseña se cifran (AES-256-GCM) antes de guardarse en Mongo.
  *
+ * Esta app hace UNA sola cosa: subir credenciales a la base. No calcula ni
+ * reporta estados (p. ej. quién está activo) — de eso se encarga apps/cerebro.
+ *
+ * POST ?login=1 -> valida usuario/clave y entrega el token de sesión.
  * GET / (sin query params) -> sirve el formulario web de carga.
- * GET ?listar=1 -> lista los colegios cargados (sin credenciales), con conteo
- * de estudiantes activos y plataformas cargadas.
+ * GET ?listar=1 -> lista los colegios cargados (sin credenciales), con sus
+ * plataformas, periodos y cantidad de estudiantes.
  */
 export const handler = async (event) => {
   try {
@@ -85,8 +89,18 @@ export const handler = async (event) => {
 
     if (metodo === 'GET' && query.listar) {
       const col = await coleccionColegios();
+      // Solo lo necesario para el listado: nunca las credenciales, y tampoco el
+      // padrón de docentes (el programa ya no gestiona sus credenciales).
       const docs = await col
-        .find({}, { projection: { 'estudiantes.login': 0, 'estudiantes.contrasena': 0, 'estudiantes.pin': 0, 'docentes.login': 0, 'docentes.contrasena': 0, 'docentes.pin': 0 } })
+        .find(
+          {},
+          {
+            projection: {
+              nombre: 1, codigo: 1, region: 1, ciudad: 1, canton: 1,
+              'estudiantes.plataforma': 1, 'estudiantes.periodo': 1,
+            },
+          }
+        )
         .toArray();
       return respuestaJson(
         200,
@@ -97,11 +111,9 @@ export const handler = async (event) => {
           region: d.region,
           ciudad: d.ciudad,
           canton: d.canton,
-          plataformas: [...new Set([...(d.estudiantes || []), ...(d.docentes || [])].map((r) => r.plataforma).filter(Boolean))],
-          periodos: [...new Set([...(d.estudiantes || []), ...(d.docentes || [])].map((r) => r.periodo).filter(Boolean))].sort(),
+          plataformas: [...new Set((d.estudiantes || []).map((r) => r.plataforma).filter(Boolean))],
+          periodos: [...new Set((d.estudiantes || []).map((r) => r.periodo).filter(Boolean))].sort(),
           estudiantes: (d.estudiantes || []).length,
-          estudiantesActivos: contarActivos(d.estudiantes),
-          docentes: (d.docentes || []).length,
         }))
       );
     }
@@ -141,40 +153,70 @@ export const handler = async (event) => {
     const buffer = Buffer.from(archivoBase64, 'base64');
     const datos = parsearExcelCredenciales(buffer);
 
-    // Marca plataforma + periodo + activo (activo = tiene PIN asociado) y cifra
-    // las credenciales antes de tocar la base.
-    const preparar = (registros) =>
-      registros.map((r) => ({
-        ...r,
-        plataforma,
-        periodo,
-        activo: Boolean(r.pin && String(r.pin).trim() !== ''),
-        login: cifrar(r.login, config.cifrado.clave),
-        contrasena: cifrar(r.contrasena, config.cifrado.clave),
-        pin: cifrar(r.pin, config.cifrado.clave),
-      }));
-
-    const nuevosDocentes = preparar(datos.docentes);
-    const nuevosEstudiantes = preparar(datos.estudiantes);
+    // Marca plataforma + periodo y cifra las credenciales antes de tocar la
+    // base. Esta app solo sube credenciales: no calcula ni guarda estados —
+    // quién está activo lo deduce apps/cerebro al consultar.
+    const preparar = (r) => ({
+      ...r,
+      plataforma,
+      periodo,
+      login: cifrar(r.login, config.cifrado.clave),
+      contrasena: cifrar(r.contrasena, config.cifrado.clave),
+    });
 
     const col = await coleccionColegios();
-
-    // Carga progresiva: esta carga reemplaza únicamente los registros de la
-    // MISMA plataforma Y el MISMO periodo; todo lo demás se conserva.
     const existente = await col.findOne({ _id: idColegio });
-    const conservarOtras = (lista = []) =>
-      lista.filter((r) => {
-        if (!r.plataforma) return false; // registro previo sin plataforma: se descarta
-        if (r.plataforma !== plataforma) return true; // otra plataforma: intacto
-        // Misma plataforma sin periodo = dato anterior a que existiera el campo;
-        // esta carga lo sustituye para no dejarlo huérfano (nunca coincidiría
-        // con ningún periodo y se acumularía para siempre).
-        if (!r.periodo) return false;
-        return r.periodo !== periodo;
-      });
 
-    const docentes = [...conservarOtras(existente?.docentes), ...nuevosDocentes];
-    const estudiantes = [...conservarOtras(existente?.estudiantes), ...nuevosEstudiantes];
+    // Identidad de una persona dentro de un colegio: su login de plataforma y,
+    // si la fila no lo trae, su nombre completo. Ojo: cifrar() usa un IV
+    // aleatorio, así que el mismo login da un cifrado distinto cada vez —
+    // comparar los valores cifrados NO sirve; hay que descifrar los guardados.
+    const idDeFila = (r) => normalizar(r.login) || 'nombre:' + normalizar(r.nombreCompleto);
+    const idDeGuardado = (r) =>
+      normalizar(descifrar(r.login, config.cifrado.clave)) || 'nombre:' + normalizar(r.nombreCompleto);
+    const mismoValor = (a, b) => (a ?? '') === (b ?? '');
+
+    // Fusiona el Excel con lo ya guardado de esta plataforma+periodo: a quien ya
+    // existía se le actualizan sus credenciales (detectando si de verdad
+    // cambiaron), y a quien no, se le agrega. No se borra a nadie que no venga
+    // en el archivo, para que una carga parcial no elimine al resto del padrón.
+    const fusionar = (guardados, filas) => {
+      const salida = guardados.slice();
+      const indice = new Map();
+      salida.forEach((r, i) => indice.set(idDeGuardado(r), i));
+
+      const resumen = { filas: filas.length, nuevos: 0, actualizados: 0, sinCambios: 0 };
+      for (const fila of filas) {
+        const id = idDeFila(fila);
+        const i = indice.get(id);
+        if (i === undefined) {
+          indice.set(id, salida.length);
+          salida.push(preparar(fila));
+          resumen.nuevos++;
+          continue;
+        }
+        const antes = salida[i];
+        const cambio = !mismoValor(descifrar(antes.contrasena, config.cifrado.clave), fila.contrasena);
+        salida[i] = preparar(fila);
+        if (cambio) resumen.actualizados++;
+        else resumen.sinCambios++;
+      }
+      return { registros: salida, resumen };
+    };
+
+    // Separa lo que esta carga toca (misma plataforma+periodo) de lo que debe
+    // quedar intacto (otras plataformas u otros periodos).
+    const esDeEstaCarga = (r) => r.plataforma === plataforma && (!r.periodo || r.periodo === periodo);
+    const intactos = (lista = []) => lista.filter((r) => r.plataforma && !esDeEstaCarga(r));
+    const deEstaCarga = (lista = []) =>
+      lista
+        .filter((r) => r.plataforma && esDeEstaCarga(r))
+        // Registros previos a que existiera "periodo": se adoptan en el periodo
+        // de esta carga en vez de quedar huérfanos sin periodo para siempre.
+        .map((r) => (r.periodo ? r : { ...r, periodo }));
+
+    const fusEstudiantes = fusionar(deEstaCarga(existente?.estudiantes), datos.estudiantes);
+    const estudiantes = [...intactos(existente?.estudiantes), ...fusEstudiantes.registros];
 
     const resultado = await col.updateOne(
       { _id: idColegio },
@@ -192,7 +234,6 @@ export const handler = async (event) => {
           provinciaNormalizada: normalizar(ciudad || 'n/a'),
           canton: canton || 'n/a',
           cantonNormalizado: normalizar(canton || 'n/a'),
-          docentes,
           estudiantes,
           hojasProcesadas: datos.hojasProcesadas,
           actualizadoEn: new Date(),
@@ -211,11 +252,16 @@ export const handler = async (event) => {
       plataforma,
       periodo,
       hojasProcesadas: datos.hojasProcesadas,
-      docentesCargados: nuevosDocentes.length,
-      estudiantesCargados: nuevosEstudiantes.length,
-      estudiantesActivos: contarActivos(nuevosEstudiantes),
-      totalDocentesColegio: docentes.length,
-      totalEstudiantesColegio: estudiantes.length,
+      // Pestañas que se ignoraron (típicamente "Docentes"): se informan para que
+      // el usuario vea que quedaron fuera a propósito.
+      hojasIgnoradas: datos.hojasIgnoradas,
+      // "actualizados" = ya existían y su contraseña cambió respecto a lo
+      // guardado; "sinCambios" = venían en el Excel idénticos a lo que ya había.
+      estudiantes: {
+        ...fusEstudiantes.resumen,
+        totalPeriodo: fusEstudiantes.registros.length,
+        totalColegio: estudiantes.length,
+      },
       creado: resultado.upsertedId !== null,
     });
   } catch (err) {

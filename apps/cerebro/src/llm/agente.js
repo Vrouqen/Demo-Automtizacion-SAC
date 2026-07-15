@@ -63,7 +63,7 @@ const TOOLS = [
     name: 'consultar_estudiantes_activos',
     description:
       'Consulta cuántos estudiantes ACTIVOS tiene un colegio de Ecuador (un estudiante está activo ' +
-      'cuando tiene PIN asociado). Acepta el id del colegio en Pegasus o el nombre del colegio.',
+      'cuando tiene credenciales de acceso cargadas). Acepta el id del colegio en Pegasus o el nombre del colegio.',
     parametersJsonSchema: {
       type: 'object',
       properties: {
@@ -94,7 +94,9 @@ const TOOLS = [
   },
   {
     name: 'info_pin',
-    description: 'Responde consultas sobre el PIN de acceso del libro de "Compartir".',
+    description:
+      'Devuelve un mini tutorial de dónde encontrar el PIN de acceso del libro de "Compartir". ' +
+      'Úsala para CUALQUIER consulta sobre el PIN.',
     parametersJsonSchema: {
       type: 'object',
       properties: {
@@ -147,10 +149,10 @@ agente digital de servicio, menciona el código del caso, y explica que la respu
 mismo hilo de correo. No prometas tiempos exactos de respuesta.
 
 ## 1c. Estudiantes activos de un colegio
-Si preguntan cuántos estudiantes activos tiene un colegio (un estudiante está activo cuando tiene PIN
-asociado), usa consultar_estudiantes_activos (con el id de Pegasus si lo dan, o con el nombre del
-colegio). Reporta el total, los activos y el desglose por plataforma si existe. Si devuelve HOMONIMOS,
-pide ciudad/cantón para confirmar el colegio.
+Si preguntan cuántos estudiantes activos tiene un colegio (un estudiante está activo cuando tiene sus
+credenciales de acceso cargadas), usa consultar_estudiantes_activos (con el id de Pegasus si lo dan, o
+con el nombre del colegio). Reporta el total, los activos y el desglose por plataforma si existe. Si
+devuelve HOMONIMOS, pide ciudad/cantón para confirmar el colegio.
 
 ## 2. Reseteo de contraseña
 SIEMPRE genera un ticket (crear_ticket, tipo "reset_password", equipo "cuentas"). No intentes
@@ -158,9 +160,11 @@ resolverlo tú mismo ni inventes una contraseña nueva. Informa que se generó u
 respuesta llegará a este mismo correo cuando esté resuelto.
 
 ## 3. PIN de acceso
-Si preguntan dónde encontrar el PIN, usa info_pin con pin_no_funciona=false (está en el reverso del
-libro de "Compartir"). Si dicen que el PIN no funciona, usa info_pin con pin_no_funciona=true (de
-momento no hay función automática para validarlo).
+Cualquier consulta sobre el PIN se responde con el mini tutorial que devuelve info_pin: explica al
+usuario, paso a paso, dónde encontrarlo (está impreso en el reverso del libro de "Compartir").
+Preséntalo como una lista numerada de pasos. Usa pin_no_funciona=false si solo preguntan dónde está,
+y pin_no_funciona=true si reportan que no les funciona (en ese caso agrega la nota que devuelve la
+herramienta). No inventes otros pasos ni prometas validar el PIN: no hay forma automática de hacerlo.
 
 ## 4. Incidencias de plataforma
 Si reportan que no ven contenido, no ven sus clases, o algo similar, usa crear_ticket (tipo
@@ -256,12 +260,19 @@ async function ejecutarTool(nombre, args, contexto) {
           tipo: 'pin_info',
           detalle: { pinNoFunciona: Boolean(args.pin_no_funciona) },
         });
-        return args.pin_no_funciona
-          ? {
-              mensaje:
-                'De momento no contamos con una función automática para validar si el PIN funciona. Este caso requiere revisión manual.',
-            }
-          : { mensaje: 'El PIN de acceso se encuentra en el reverso del libro de "Compartir".' };
+        // Toda consulta de PIN se resuelve con este mini tutorial de dónde
+        // encontrarlo. No hay forma automática de validar un PIN.
+        return {
+          tutorial: [
+            'Toma el libro de "Compartir" del estudiante.',
+            'Voltea el libro y revisa el reverso (la contraportada).',
+            'Ahí está impreso el PIN de acceso.',
+            'Ingresa ese PIN en la plataforma para activar el libro.',
+          ],
+          nota: args.pin_no_funciona
+            ? 'Si después de seguir estos pasos el PIN sigue sin funcionar, pide al usuario que responda a este mismo correo indicándolo, para revisarlo manualmente.'
+            : null,
+        };
       }
       case 'fuera_de_alcance': {
         await registrarEvento(contexto.hiloId, { tipo: 'fuera_de_alcance', detalle: {} });

@@ -179,7 +179,7 @@ tengan las credenciales del Jira externo:
 - `GET {URL-CEREBRO}/?reporte=analitica` — resumen agregado (tickets por tipo/estado, eventos por
   tipo — incluidos `escalado_a_agente` y `respuesta_agente_entregada` —, total de conversaciones).
 - `GET {URL-CEREBRO}/?reporte=estudiantes_activos&idColegio=<id Pegasus>` — cantidad de estudiantes
-  activos de un colegio (activo = tiene PIN asociado), con desglose por plataforma (Compartir/CREO).
+  activos de un colegio (activo = tiene credenciales cargadas), con desglose por plataforma (Compartir/CREO).
 
 Puedes armar un nodo HTTP Request + Schedule Trigger en n8n para traer cualquiera de los dos
 periódicamente a una hoja de Google Sheets o a un dashboard, sin tocar el cerebro.

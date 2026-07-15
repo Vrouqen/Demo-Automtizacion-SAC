@@ -62,51 +62,64 @@ function parsearHoja(hoja) {
   return registros;
 }
 
+const esHojaDocentes = (n) => {
+  const h = normalizar(n);
+  return h.includes('docente') || h.includes('profesor') || h.includes('maestro');
+};
+const esHojaEstudiantes = (n) => {
+  const h = normalizar(n);
+  return h.includes('estudiante') || h.includes('alumno');
+};
+
+function error400(mensaje) {
+  const err = new Error(mensaje);
+  err.statusCode = 400;
+  return err;
+}
+
 /**
- * Parsea un Excel de credenciales. Soporta archivos con pestañas
- * "Docentes" y/o "Estudiantes"; si no existen, usa la hoja activa
- * y la trata como estudiantes.
+ * Parsea un Excel de credenciales y devuelve ÚNICAMENTE estudiantes.
+ *
+ * El archivo suele traer dos pestañas ("Docentes" y "Estudiantes"): la de
+ * docentes se ignora a propósito — el programa ya no gestiona sus credenciales.
+ * Si no hay pestaña de estudiantes se usa la primera hoja que NO sea de
+ * docentes; nunca se toma una hoja de docentes como respaldo, para no cargar
+ * profesores como si fueran alumnos.
  */
 export function parsearExcelCredenciales(buffer) {
   let libro;
   try {
     libro = XLSX.read(buffer, { type: 'buffer' });
   } catch {
-    const err = new Error('Archivo Excel inválido');
-    err.statusCode = 400;
-    throw err;
+    throw error400('Archivo Excel inválido');
   }
 
-  const resultado = { docentes: [], estudiantes: [], hojasProcesadas: [] };
+  const nombresHojas = libro.SheetNames || [];
+  if (nombresHojas.length === 0) throw error400('El archivo Excel no tiene hojas');
 
-  const nombresHojas = libro.SheetNames;
-  const hojaDocentes = nombresHojas.find((n) => normalizar(n).includes('docente'));
-  const hojaEstudiantes = nombresHojas.find(
-    (n) => normalizar(n).includes('estudiante') || normalizar(n).includes('alumno')
-  );
+  const hojaEstudiantes = nombresHojas.find(esHojaEstudiantes);
+  const hojaUsada = hojaEstudiantes || nombresHojas.find((n) => !esHojaDocentes(n));
 
-  if (hojaDocentes) {
-    resultado.docentes = parsearHoja(libro.Sheets[hojaDocentes]);
-    resultado.hojasProcesadas.push(hojaDocentes);
-  }
-  if (hojaEstudiantes) {
-    resultado.estudiantes = parsearHoja(libro.Sheets[hojaEstudiantes]);
-    resultado.hojasProcesadas.push(hojaEstudiantes);
-  }
-
-  // Sin pestañas reconocidas: usa la primera hoja como estudiantes
-  if (!hojaDocentes && !hojaEstudiantes && nombresHojas.length > 0) {
-    resultado.estudiantes = parsearHoja(libro.Sheets[nombresHojas[0]]);
-    resultado.hojasProcesadas.push(nombresHojas[0]);
-  }
-
-  if (resultado.docentes.length === 0 && resultado.estudiantes.length === 0) {
-    const err = new Error(
-      'No se encontraron registros válidos. Verifica las pestañas "Docentes"/"Estudiantes" y las columnas (Grado, Grupo, Apellido Paterno, Apellido Materno, Nombre, Login, Contraseña).'
+  if (!hojaUsada) {
+    throw error400(
+      'El archivo solo contiene pestañas de Docentes. Se necesitan credenciales de estudiantes: ' +
+        'incluye una pestaña "Estudiantes".'
     );
-    err.statusCode = 400;
-    throw err;
   }
 
-  return resultado;
+  const estudiantes = parsearHoja(libro.Sheets[hojaUsada]);
+  if (estudiantes.length === 0) {
+    throw error400(
+      `No se encontraron estudiantes válidos en la hoja "${hojaUsada}". Verifica las columnas ` +
+        '(Grado, Grupo, Apellido Paterno, Apellido Materno, Nombre, Login, Contraseña).'
+    );
+  }
+
+  return {
+    estudiantes,
+    hojasProcesadas: [hojaUsada],
+    // Todo lo que quedó fuera (típicamente la pestaña de docentes), para poder
+    // avisar al usuario qué se ignoró en vez de descartarlo en silencio.
+    hojasIgnoradas: nombresHojas.filter((n) => n !== hojaUsada),
+  };
 }

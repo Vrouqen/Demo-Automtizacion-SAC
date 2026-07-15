@@ -6,8 +6,8 @@ export const config = {
     db: process.env.MONGODB_DB || 'sac',
     coleccion: process.env.MONGODB_COLLECTION_COLEGIOS || 'colegios',
   },
-  // Clave AES-256 (32 bytes en base64) para cifrar login/contraseña/PIN antes
-  // de guardarlos en Mongo. Debe ser LA MISMA que usa apps/cerebro.
+  // Clave AES-256 (32 bytes en base64) para cifrar login/contraseña antes de
+  // guardarlos en Mongo. Debe ser LA MISMA que usa apps/cerebro.
   cifrado: {
     clave: process.env.CREDENCIALES_ENC_KEY,
   },

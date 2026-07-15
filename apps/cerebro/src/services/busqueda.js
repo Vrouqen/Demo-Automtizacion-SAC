@@ -52,8 +52,8 @@ function ajustePorUbicacion(valorConsulta, valorColegio, peso) {
 export async function buscarColegio({ colegio, region, ciudad, canton }) {
   const col = await coleccionColegios();
   // Para el match del nombre solo necesitamos identificación y ubicación; NO
-  // traemos estudiantes/docentes (cada colegio arrastra su padrón completo con
-  // credenciales cifradas). Así el escaneo difuso —que recorre todos los
+  // traemos el padrón de estudiantes (cada colegio arrastra el suyo completo,
+  // con credenciales cifradas). Así el escaneo difuso —que recorre todos los
   // colegios— mueve kilobytes en vez de megabytes.
   const docs = await col
     .find({}, { projection: { nombre: 1, codigo: 1, region: 1, ciudad: 1, provincia: 1, canton: 1 } })
@@ -196,22 +196,23 @@ export async function buscarEstudiante({ nombreCompleto, nivel, paralelo, colegi
 
 /**
  * Cantidad de estudiantes activos de un colegio de Ecuador.
- * Un estudiante está ACTIVO cuando tiene PIN asociado (marca "activo" que
- * calcula apps/carga-credenciales al subir el Excel; para datos antiguos sin
- * la marca, se considera activo si la fila trae PIN).
+ * Un estudiante está ACTIVO cuando tiene credenciales de acceso cargadas. Se
+ * deduce aquí, de la presencia del login: apps/carga-credenciales solo sube
+ * credenciales y no guarda ningún estado. Deducirlo en vez de leer una marca
+ * guardada también hace que los datos cargados con versiones anteriores se
+ * cuenten bien, sin necesidad de volver a subir sus Excels.
  * `idColegio` es el id del colegio en Pegasus (el _id del documento).
  */
 export async function contarEstudiantesActivos({ idColegio }) {
   const col = await coleccionColegios();
-  // Para contar activos solo necesitamos plataforma + activo + presencia de PIN
-  // de cada estudiante; excluimos login/contraseña (blobs cifrados) y todo el
-  // padrón de docentes de la respuesta.
+  // Basta plataforma + presencia de login; el login viene cifrado y aquí no se
+  // descifra, solo se mira si existe.
   const doc = await col.findOne(
     { $or: [{ _id: idColegio }, { codigo: idColegio }] },
     {
       projection: {
         nombre: 1, codigo: 1, region: 1, ciudad: 1, provincia: 1, canton: 1,
-        'estudiantes.plataforma': 1, 'estudiantes.activo': 1, 'estudiantes.pin': 1,
+        'estudiantes.plataforma': 1, 'estudiantes.login': 1,
       },
     }
   );
@@ -220,7 +221,7 @@ export async function contarEstudiantesActivos({ idColegio }) {
   }
 
   const estudiantes = doc.estudiantes || [];
-  const esActivo = (e) => e.activo === true || (e.activo === undefined && Boolean(e.pin));
+  const esActivo = (e) => Boolean(e.login);
 
   const porPlataforma = {};
   let activos = 0;
