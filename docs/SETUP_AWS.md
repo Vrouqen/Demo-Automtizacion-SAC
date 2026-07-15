@@ -36,6 +36,27 @@ Cada paso trae dos caminos — sigue el que te resulte más cómodo, no hace fal
 
 ---
 
+## 0. Permitir que las Lambdas lleguen a MongoDB Atlas (Network Access)
+
+⚠️ **Paso obligatorio, se olvida fácil y produce un 502 en la Function URL si se salta.**
+
+Las Lambdas de este proyecto corren **fuera de una VPC** (a propósito, para no pagar NAT Gateway —
+ver el costo en `docs/MIGRACION_MONGO_AWS.md`). Eso significa que sus conexiones salientes usan IPs
+públicas dinámicas del pool compartido de AWS: **no existe una IP fija ni una lista corta que
+whitelistear** en Atlas.
+
+En **MongoDB Atlas → tu proyecto → Network Access → Add IP Address → Allow Access from Anywhere
+(`0.0.0.0/0`)**. La seguridad la sigue dando el usuario/contraseña del connection string y, dentro de
+Mongo, el cifrado de campo de login/contraseña/PIN (mismo razonamiento que el puerto 27017 abierto en
+la opción EC2 de `MIGRACION_MONGO_AWS.md`).
+
+Si dejas Atlas con una IP específica whitelisteada (ej. la tuya de casa), las Lambdas se conectarán
+desde una IP distinta, Atlas rechazará la conexión, `MongoClient.connect()` colgará hasta agotar
+`serverSelectionTimeoutMS` y la Function URL devolverá **502 Bad Gateway**. Si te pasa esto, confírmalo
+en **CloudWatch Logs** de la función (busca `MongoServerSelectionError` o `connection timed out`).
+
+---
+
 ## 1. Guardar el connection string de Mongo y la key de Gemini (Parameter Store)
 
 Guardamos los dos valores sensibles en **SSM Parameter Store** (gratis, tier estándar) para no
@@ -200,7 +221,10 @@ aws iam put-role-policy --role-name rol-lambda-sac --policy-name leer-ssm-sac --
 2. Selecciona **"Container image"** (no "Author from scratch").
 3. Function name: `cerebro-sac`.
 4. Container image URI: **Browse images** → selecciona el repositorio `cerebro-sac` → tag `latest`.
-5. Architecture: `x86_64` (por defecto, coincide con el `Dockerfile`).
+5. Architecture: **`x86_64`** — ⚠️ NO selecciones `arm64`/Graviton aunque la consola lo sugiera como
+   más barato: el `Dockerfile` construye con `--platform linux/amd64` (paso 3), y si la arquitectura
+   de la función no coincide con la de la imagen, la función falla en cada invocación con
+   `Runtime.InvalidEntrypoint` (falla en milisegundos, antes de ejecutar una sola línea de tu código).
 6. Despliega **"Change default execution role"** → `Use an existing role` → selecciona
    `rol-lambda-sac`.
 7. **Create function**.
@@ -388,7 +412,8 @@ y luego:
 ### 🖱️ Consola
 
 Entra a la función → botón **Deploy new image** (o en algunas versiones de la consola, dentro de
-**Image → Deploy new image**) → confirma que apunta al tag `latest` → **Save**.
+**Image → Deploy new image**) → confirma que apunta al tag `latest` → **Save**. Este camino no toca
+la arquitectura de la función, así que no hay riesgo de desalineamiento.
 
 ### ⌨️ CLI
 
