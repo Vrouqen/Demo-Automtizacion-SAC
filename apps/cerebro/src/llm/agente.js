@@ -1,7 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
-import { buscarEstudiante } from '../services/busqueda.js';
+import { buscarEstudiante, buscarColegio, contarEstudiantesActivos } from '../services/busqueda.js';
 import { crearTicket } from '../services/tickets.js';
+import { crearEscalamiento } from '../services/escalamientos.js';
 import { obtenerOCrearConversacion, registrarMensaje, registrarEvento } from '../services/conversaciones.js';
 import { coleccionConversaciones } from '../db/mongo.js';
 
@@ -13,18 +14,65 @@ const TOOLS = [
     description:
       'Busca las credenciales (login y contraseña) de un estudiante. Usa coincidencia difusa: ' +
       'tolera nombres incompletos en la base de datos (ej. solo un nombre y un apellido) y nombres ' +
-      'de colegio escritos de forma aproximada. Llama a esta herramienta en cuanto tengas al menos ' +
-      'el nombre del estudiante y el colegio; si falta la provincia, usa "n/a".',
+      'de colegio escritos de forma aproximada. La ciudad (provincia) y el cantón ayudan a ' +
+      'distinguir colegios homónimos. Llama a esta herramienta en cuanto tengas al menos ' +
+      'el nombre del estudiante y el colegio; usa "n/a" en los datos de ubicación que no tengas.',
     parametersJsonSchema: {
       type: 'object',
       properties: {
         nombre_completo: { type: 'string', description: 'Nombre completo del estudiante' },
         nivel: { type: 'string', description: 'Nivel o grado del estudiante (si se conoce)' },
         paralelo: { type: 'string', description: 'Paralelo o grupo (si se conoce)' },
-        colegio: { type: 'string', description: 'Nombre completo de la unidad educativa' },
-        provincia: { type: 'string', description: 'Provincia del colegio; "n/a" si no se conoce' },
+        colegio: {
+          type: 'string',
+          description: 'Nombre de la unidad educativa (el oficial o cualquier nombre alternativo que dé el usuario)',
+        },
+        region: { type: 'string', description: 'Región del colegio (Costa, Sierra, Oriente, Insular); "n/a" si no se conoce' },
+        ciudad: { type: 'string', description: 'Ciudad (provincia) del colegio; "n/a" si no se conoce' },
+        canton: { type: 'string', description: 'Cantón del colegio; "n/a" si no se conoce' },
       },
       required: ['nombre_completo', 'colegio'],
+    },
+  },
+  {
+    name: 'derivar_a_agente_digital',
+    description:
+      'Deriva el caso a una persona (agente digital de servicio). Úsala SOLO cuando el colegio no se ' +
+      'encuentra después de haber pedido al usuario otro nombre con el que se conozca la institución: ' +
+      'es decir, si el usuario dice que no conoce otro nombre, o si ya dio un nombre alternativo y la ' +
+      'búsqueda volvió a fallar. NO la uses en el primer intento fallido.',
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        motivo: {
+          type: 'string',
+          enum: ['colegio_no_encontrado', 'otro'],
+          description: 'Motivo del escalamiento',
+        },
+        resumen_caso: {
+          type: 'string',
+          description:
+            'Resumen completo para el agente humano: qué pide el usuario, nombre del estudiante, ' +
+            'todos los nombres de colegio que se intentaron, ciudad/cantón si se conocen, y qué falló.',
+        },
+      },
+      required: ['motivo', 'resumen_caso'],
+    },
+  },
+  {
+    name: 'consultar_estudiantes_activos',
+    description:
+      'Consulta cuántos estudiantes ACTIVOS tiene un colegio de Ecuador (un estudiante está activo ' +
+      'cuando tiene PIN asociado). Acepta el id del colegio en Pegasus o el nombre del colegio.',
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        id_colegio: { type: 'string', description: 'Id del colegio en Pegasus (si se conoce)' },
+        colegio: { type: 'string', description: 'Nombre del colegio (si no se tiene el id)' },
+        ciudad: { type: 'string', description: 'Ciudad (provincia), para desambiguar homónimos' },
+        canton: { type: 'string', description: 'Cantón, para desambiguar homónimos' },
+      },
+      required: [],
     },
   },
   {
@@ -72,18 +120,37 @@ profesional y cordial, apropiado para un correo de soporte (puedes ser un poco m
 chat, pero ve al punto).
 
 ## 1. Obtener credenciales de un estudiante
-Necesitas: nombre completo de la unidad educativa, provincia, nombre completo del estudiante, nivel y
-paralelo. Si falta alguno, pídelo en tu respuesta; pero si ya tienes al menos nombre y colegio, intenta
-buscar de todas formas (usa "n/a" para provincia si no la tienes) y usa el resultado para decidir qué
-más preguntar.
+Necesitas: nombre de la unidad educativa, ciudad (provincia) y cantón, nombre completo del estudiante,
+nivel y paralelo. Si falta alguno, pídelo en tu respuesta; pero si ya tienes al menos nombre y colegio,
+intenta buscar de todas formas (usa "n/a" para los datos de ubicación que no tengas) y usa el
+resultado para decidir qué más preguntar.
 Usa buscar_credenciales e interpreta el resultado:
-- OK: entrega login y contraseña con claridad.
-- COLEGIO_NO_ENCONTRADO: indica que no se encontró el colegio; si hay "sugerencias", muéstralas
-  (nombre + provincia) para que el remitente confirme cuál es al responder este mismo correo.
+- OK: entrega login y contraseña con claridad (indica también la plataforma: Compartir o CREO).
+- HOMONIMOS: hay dos o más colegios con nombre igual o muy parecido. Muestra las opciones con su
+  ciudad (provincia) y cantón, y pide al usuario confirmar cuál corresponde. NUNCA elijas uno al azar.
+- COLEGIO_NO_ENCONTRADO: sigue este flujo EN ORDEN, sin saltarte pasos:
+  1. Si hay "sugerencias", muéstralas (nombre + ciudad + cantón) para que el remitente confirme.
+  2. Si no hay sugerencias útiles (o el usuario ya las descartó), pregunta si conoce la institución
+     por ALGÚN OTRO NOMBRE (nombre comercial, nombre anterior, siglas, etc.).
+  3. Si el usuario da otro nombre, vuelve a buscar con ese nombre.
+  4. SOLO si el usuario dice que no conoce otro nombre, o si la búsqueda con el nombre alternativo
+     también falla, usa derivar_a_agente_digital con un resumen completo del caso.
 - ESTUDIANTE_NO_ENCONTRADO: indícalo y sugiere revisar el nombre, nivel o paralelo.
 - CANDIDATOS: el nombre en la base puede estar incompleto (ej. un nombre y un apellido). Muestra los
   candidatos (nombre, grado, grupo) y pide confirmar cuál corresponde, o el dato que falta.
 - SIN_COLEGIOS: informa que aún no hay colegios cargados en el sistema.
+
+## 1b. Derivación a un agente digital de servicio
+Cuando uses derivar_a_agente_digital, la herramienta asigna el caso a una persona del equipo y
+devuelve un código de caso. En tu respuesta al usuario: informa que su caso será atendido por un
+agente digital de servicio, menciona el código del caso, y explica que la respuesta le llegará a este
+mismo hilo de correo. No prometas tiempos exactos de respuesta.
+
+## 1c. Estudiantes activos de un colegio
+Si preguntan cuántos estudiantes activos tiene un colegio (un estudiante está activo cuando tiene PIN
+asociado), usa consultar_estudiantes_activos (con el id de Pegasus si lo dan, o con el nombre del
+colegio). Reporta el total, los activos y el desglose por plataforma si existe. Si devuelve HOMONIMOS,
+pide ciudad/cantón para confirmar el colegio.
 
 ## 2. Reseteo de contraseña
 SIEMPRE genera un ticket (crear_ticket, tipo "reset_password", equipo "cuentas"). No intentes
@@ -119,11 +186,52 @@ async function ejecutarTool(nombre, args, contexto) {
           nivel: args.nivel,
           paralelo: args.paralelo,
           colegio: args.colegio,
-          provincia: args.provincia || 'n/a',
+          region: args.region || 'n/a',
+          ciudad: args.ciudad || 'n/a',
+          canton: args.canton || 'n/a',
         });
         await registrarEvento(contexto.hiloId, {
           tipo: `credencial_${String(resultado.status).toLowerCase()}`,
           detalle: { colegio: args.colegio, nombre: args.nombre_completo },
+        });
+        return resultado;
+      }
+      case 'derivar_a_agente_digital': {
+        const escalamiento = await crearEscalamiento({
+          hiloId: contexto.hiloId,
+          mensajeId: contexto.mensajeId,
+          remitente: contexto.remitente,
+          asunto: contexto.asunto,
+          motivo: args.motivo,
+          resumen: args.resumen_caso,
+        });
+        await registrarEvento(contexto.hiloId, {
+          tipo: 'escalado_a_agente',
+          detalle: { codigo: escalamiento.codigo, agenteEmail: escalamiento.agenteEmail, motivo: args.motivo },
+        });
+        contexto.escalamiento = escalamiento;
+        // Al modelo solo le interesa el código para informar al usuario;
+        // el correo de delegación lo envía n8n, no el modelo.
+        return { status: 'OK', codigo: escalamiento.codigo };
+      }
+      case 'consultar_estudiantes_activos': {
+        let idColegio = args.id_colegio;
+        if (!idColegio && args.colegio) {
+          const resColegio = await buscarColegio({
+            colegio: args.colegio,
+            ciudad: args.ciudad || 'n/a',
+            canton: args.canton || 'n/a',
+          });
+          if (resColegio.status !== 'OK') return resColegio;
+          idColegio = resColegio.colegio._id;
+        }
+        if (!idColegio) {
+          return { error: 'Falta el id del colegio (Pegasus) o el nombre del colegio' };
+        }
+        const resultado = await contarEstudiantesActivos({ idColegio });
+        await registrarEvento(contexto.hiloId, {
+          tipo: 'consulta_estudiantes_activos',
+          detalle: { idColegio, status: resultado.status },
         });
         return resultado;
       }
@@ -173,7 +281,7 @@ async function ejecutarTool(nombre, args, contexto) {
  * desde Mongo (colección conversaciones) en cada invocación, en vez de
  * mantenerse en memoria entre llamadas.
  */
-export async function procesarCorreo({ hiloId, remitente, cuentaSoporte, asunto, cuerpo, adjuntos = [] }) {
+export async function procesarCorreo({ hiloId, mensajeId, remitente, cuentaSoporte, asunto, cuerpo, adjuntos = [] }) {
   await obtenerOCrearConversacion({ hiloId, remitente, cuentaSoporte, asunto });
   await registrarMensaje(hiloId, { rol: 'usuario', cuerpo, adjuntos });
 
@@ -188,7 +296,7 @@ export async function procesarCorreo({ hiloId, remitente, cuentaSoporte, asunto,
     .map((m) => ({ role: m.rol === 'usuario' ? 'user' : 'model', parts: [{ text: m.cuerpo }] }));
 
   const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-  const contexto = { hiloId, remitente, adjuntos, ultimoTicket: null };
+  const contexto = { hiloId, mensajeId, remitente, asunto, adjuntos, ultimoTicket: null, escalamiento: null };
   const generarConfig = { systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations: TOOLS }] };
 
   let respuesta = await ai.models.generateContent({
@@ -219,5 +327,19 @@ export async function procesarCorreo({ hiloId, remitente, cuentaSoporte, asunto,
   const textoFinal = respuesta.text || 'No pude procesar la solicitud, por favor intenta de nuevo.';
   await registrarMensaje(hiloId, { rol: 'asistente', cuerpo: textoFinal });
 
-  return { hiloId, textoRespuesta: textoFinal, ticket: contexto.ultimoTicket };
+  // "accion" es la que usa el Switch de n8n para decidir la rama:
+  //  - escalar: además de responder al usuario, enviar el correo de delegación al agente
+  //  - responder_y_crear_ticket: rama donde se conectará el nodo Jira cuando salga de standby
+  //  - responder: solo contestar el hilo
+  let accion = 'responder';
+  if (contexto.escalamiento) accion = 'escalar';
+  else if (contexto.ultimoTicket) accion = 'responder_y_crear_ticket';
+
+  return {
+    hiloId,
+    accion,
+    textoRespuesta: textoFinal,
+    ticket: contexto.ultimoTicket,
+    escalamiento: contexto.escalamiento,
+  };
 }

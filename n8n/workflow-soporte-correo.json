@@ -17,18 +17,40 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.subject ?? '' }}",
+              "rightValue": "CASO-",
+              "operator": { "type": "string", "operation": "notContains" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-no-es-respuesta-agente",
+      "name": "IF: no es respuesta de agente",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "notes": "Los correos con 'CASO-' en el asunto son respuestas de agentes digitales a casos escalados: los procesa el flujo 2 (workflow-respuesta-agente.json), NO este. Salida true = correo normal de cliente."
+    },
+    {
+      "parameters": {
         "jsCode": "return [{\n  json: {\n    hiloId: $json.conversationId,\n    mensajeId: $json.id,\n    remitente: $json.from?.emailAddress?.address ?? '',\n    cuentaSoporte: $json.toRecipients?.[0]?.emailAddress?.address ?? '',\n    asunto: $json.subject ?? '',\n    cuerpo: $json.body?.content ?? $json.bodyPreview ?? '',\n    adjuntos: [],\n  },\n}];"
       },
       "id": "code-armar-payload",
       "name": "Code: armar payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [260, 0]
+      "position": [440, 0]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://REEMPLAZAR-CON-TU-FUNCTION-URL.lambda-url.us-east-1.on.aws/",
+        "url": "https://REEMPLAZAR-CON-TU-FUNCTION-URL.lambda-url.us-east-2.on.aws/",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -38,12 +60,27 @@
       "name": "HTTP Request -> cerebro",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [520, 0]
+      "position": [660, 0]
     },
     {
       "parameters": {
         "rules": {
           "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "escalar",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalar"
+            },
             {
               "conditions": {
                 "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
@@ -68,8 +105,26 @@
       "name": "Switch: accion",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
-      "position": [780, 0],
-      "notes": "Ambas ramas (responder y responder_y_crear_ticket) van al mismo Reply mientras Jira está en standby. Cuando Jira se active, agrega el nodo Jira en la rama responder_y_crear_ticket antes del Reply."
+      "position": [880, 0],
+      "notes": "escalar: envía la delegación al agente digital y LUEGO responde al cliente. responder_y_crear_ticket: cuando Jira salga de standby, agrega aquí el nodo Jira antes del Reply."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toRecipients": "={{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.para }}",
+        "subject": "={{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.asunto }}",
+        "bodyContent": "={{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.cuerpo }}"
+      },
+      "id": "outlook-delegacion",
+      "name": "Outlook: Enviar delegación a agente",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1100, -140],
+      "notes": "Envía el caso al agente digital de servicio. El asunto trae [CASO-XXXXXX]: el agente debe responder manteniéndolo, para que el flujo 2 devuelva su respuesta al cliente en el hilo original.",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
+      }
     },
     {
       "parameters": {
@@ -82,7 +137,7 @@
       "name": "Outlook: Reply (mismo hilo)",
       "type": "n8n-nodes-base.microsoftOutlook",
       "typeVersion": 2,
-      "position": [1040, 0],
+      "position": [1340, 0],
       "notes": "Verifica el nombre exacto del parámetro para el buzón (mailbox) si respondes desde soporte1@empresa.com y no desde la cuenta autenticada.",
       "credentials": {
         "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
@@ -90,20 +145,23 @@
     },
     {
       "parameters": {
-        "content": "## Jira en STANDBY\nEl cerebro ya deja cada ticket en Mongo con estado 'pendiente_jira' y, si aplica, enlazado al ticket anterior del mismo hilo (campo 'enlazadoA'). Cuando tengan credenciales del Jira externo, agreguen aquí el nodo Jira (crear + link issue) en la rama 'responder_y_crear_ticket', y un segundo flujo (Jira Trigger o Schedule Trigger con polling) para el correo de cierre. Ver docs/SETUP_N8N.md punto 5.",
-        "height": 220,
-        "width": 320
+        "content": "## Escalamiento a agente digital\nCuando el cerebro devuelve accion='escalar', este flujo:\n1. Envía el correo de delegación al agente (escalamiento.correoDelegacion.{para,asunto,cuerpo}).\n2. Responde al cliente en su mismo hilo avisando que un digital de servicio atenderá el caso.\nLa respuesta del agente la procesa el flujo 2: n8n/workflow-respuesta-agente.json.\n\n## Jira en STANDBY\nCada ticket queda en Mongo con estado 'pendiente_jira' (campo 'enlazadoA' si aplica). Cuando haya credenciales, agregar nodo Jira en la rama 'responder_y_crear_ticket'. Ver docs/SETUP_N8N.md.",
+        "height": 300,
+        "width": 360
       },
-      "id": "sticky-jira",
-      "name": "Nota: Jira standby",
+      "id": "sticky-notas",
+      "name": "Notas",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [780, 260]
+      "position": [880, 260]
     }
   ],
   "connections": {
     "Outlook Trigger - soporte1": {
-      "main": [[{ "node": "Code: armar payload", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "IF: no es respuesta de agente", "type": "main", "index": 0 }]]
+    },
+    "IF: no es respuesta de agente": {
+      "main": [[{ "node": "Code: armar payload", "type": "main", "index": 0 }], []]
     },
     "Code: armar payload": {
       "main": [[{ "node": "HTTP Request -> cerebro", "type": "main", "index": 0 }]]
@@ -113,9 +171,13 @@
     },
     "Switch: accion": {
       "main": [
+        [{ "node": "Outlook: Enviar delegación a agente", "type": "main", "index": 0 }],
         [{ "node": "Outlook: Reply (mismo hilo)", "type": "main", "index": 0 }],
         [{ "node": "Outlook: Reply (mismo hilo)", "type": "main", "index": 0 }]
       ]
+    },
+    "Outlook: Enviar delegación a agente": {
+      "main": [[{ "node": "Outlook: Reply (mismo hilo)", "type": "main", "index": 0 }]]
     }
   },
   "active": false,

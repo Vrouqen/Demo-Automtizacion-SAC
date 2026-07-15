@@ -31,3 +31,8 @@ export async function coleccionConversaciones() {
   const client = await obtenerClient();
   return client.db(config.mongo.db).collection(config.mongo.coleccionConversaciones);
 }
+
+export async function coleccionEscalamientos() {
+  const client = await obtenerClient();
+  return client.db(config.mongo.db).collection(config.mongo.coleccionEscalamientos);
+}

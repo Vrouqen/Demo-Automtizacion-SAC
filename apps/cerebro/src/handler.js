@@ -1,6 +1,8 @@
 import { validarConfig } from './config.js';
 import { procesarCorreo } from './llm/agente.js';
-import { obtenerAnalitica } from './services/conversaciones.js';
+import { obtenerAnalitica, registrarMensaje, registrarEvento } from './services/conversaciones.js';
+import { contarEstudiantesActivos } from './services/busqueda.js';
+import { resolverEscalamiento, extraerCodigoCaso } from './services/escalamientos.js';
 
 function respuestaJson(statusCode, cuerpo) {
   return {
@@ -10,10 +12,22 @@ function respuestaJson(statusCode, cuerpo) {
   };
 }
 
+function parsearBody(event) {
+  if (!event.body) return null;
+  const raw = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
+  return JSON.parse(raw);
+}
+
 /**
- * Lambda expuesta vía Function URL. n8n llama a este endpoint por cada
- * correo entrante ya parseado (POST), o para consultar la analítica
- * agregada (GET ?reporte=analitica).
+ * Lambda expuesta vía Function URL.
+ *
+ * POST /                             correo entrante parseado por n8n (flujo principal)
+ * POST /?accion=respuesta_agente     respuesta de un agente digital a un caso escalado
+ *                                    body: { codigo?, asunto?, respuesta, correoAgente? }
+ *                                    (si no viene "codigo", se extrae CASO-XXXXXX del asunto)
+ * GET  /?reporte=analitica           analítica agregada del piloto
+ * GET  /?reporte=estudiantes_activos&idColegio=<id Pegasus>
+ *                                    cantidad de estudiantes activos (activo = tiene PIN)
  */
 export const handler = async (event) => {
   try {
@@ -27,11 +41,49 @@ export const handler = async (event) => {
       return respuestaJson(200, resumen);
     }
 
-    if (!event.body) {
+    if (metodo === 'GET' && query.reporte === 'estudiantes_activos') {
+      if (!query.idColegio) {
+        return respuestaJson(400, { error: 'Falta el parámetro idColegio (id del colegio en Pegasus)' });
+      }
+      const resultado = await contarEstudiantesActivos({ idColegio: query.idColegio });
+      return respuestaJson(resultado.status === 'OK' ? 200 : 404, resultado);
+    }
+
+    // Flujo 2 de n8n: un agente digital respondió un caso escalado.
+    if (metodo === 'POST' && query.accion === 'respuesta_agente') {
+      const body = parsearBody(event);
+      if (!body) return respuestaJson(400, { error: 'Falta el body de la solicitud' });
+
+      const codigo = body.codigo || extraerCodigoCaso(body.asunto);
+      if (!codigo) {
+        return respuestaJson(400, { error: 'No se encontró el código de caso (CASO-XXXXXX) ni en "codigo" ni en "asunto"' });
+      }
+      if (!body.respuesta) {
+        return respuestaJson(400, { error: 'Falta el campo "respuesta" (texto del correo del agente)' });
+      }
+
+      const resultado = await resolverEscalamiento({
+        codigo,
+        respuestaAgente: body.respuesta,
+        correoAgente: body.correoAgente,
+      });
+
+      if (resultado.status === 'OK') {
+        await registrarMensaje(resultado.hiloId, { rol: 'asistente', cuerpo: resultado.textoRespuesta });
+        await registrarEvento(resultado.hiloId, {
+          tipo: 'respuesta_agente_entregada',
+          detalle: { codigo, correoAgente: body.correoAgente || null },
+        });
+      }
+
+      return respuestaJson(resultado.status === 'OK' ? 200 : 404, resultado);
+    }
+
+    // Flujo principal: correo entrante del usuario final.
+    const body = parsearBody(event);
+    if (!body) {
       return respuestaJson(400, { error: 'Falta el body de la solicitud' });
     }
-    const raw = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
-    const body = JSON.parse(raw);
 
     const faltantes = ['hiloId', 'remitente', 'cuerpo'].filter((c) => !body[c]);
     if (faltantes.length > 0) {

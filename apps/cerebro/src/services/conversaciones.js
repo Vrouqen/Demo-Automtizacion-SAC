@@ -24,7 +24,9 @@ export async function obtenerOCrearConversacion({ hiloId, remitente, cuentaSopor
     },
     { upsert: true }
   );
-  return col.findOne({ _id: hiloId });
+  // No devolvemos el documento: el único llamador (procesarCorreo) vuelve a
+  // leer la conversación DESPUÉS de registrar el mensaje del usuario, así que
+  // un findOne aquí sería una lectura desperdiciada en el camino caliente.
 }
 
 export async function registrarMensaje(hiloId, mensaje) {

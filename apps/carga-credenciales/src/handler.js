@@ -1,7 +1,8 @@
-import { validarConfig } from './config.js';
+import { config, validarConfig } from './config.js';
 import { parsearExcelCredenciales } from './excel/parseExcel.js';
 import { coleccionColegios } from './db/mongo.js';
 import { normalizar } from './utils/similitud.js';
+import { cifrar } from './utils/cifrado.js';
 
 function respuestaJson(statusCode, cuerpo) {
   return {
@@ -11,15 +12,32 @@ function respuestaJson(statusCode, cuerpo) {
   };
 }
 
+function contarActivos(estudiantes = []) {
+  return estudiantes.filter((e) => e.activo).length;
+}
+
 /**
- * Lambda expuesta vía Function URL.
+ * Lambda expuesta vía Function URL. Permite cargar credenciales de forma
+ * progresiva: cada POST reemplaza solo las credenciales de LA PLATAFORMA
+ * indicada para ese colegio; las de la otra plataforma se conservan.
  *
  * POST body (JSON):
- *   { idColegio, codigoColegio, nombreColegio, provincia?, nombreArchivo, archivoBase64 }
- * archivoBase64 = contenido del .xlsx codificado en base64 (ver docs/SETUP_AWS.md
- * para el ejemplo de curl).
+ *   {
+ *     idColegio,        // Id del colegio (id de Pegasus)
+ *     codigoColegio,    // Código del colegio
+ *     region,           // Región (Costa / Sierra / Oriente / Insular)
+ *     ciudad,           // Ciudad (Provincia) — se acepta también "provincia"
+ *     canton,           // Cantón
+ *     nombreColegio,    // Nombre del colegio (del avance)
+ *     plataforma,       // OBLIGATORIO: solo "compartir" o "creo"
+ *     nombreArchivo, archivoBase64
+ *   }
  *
- * GET ?listar=1 -> lista los colegios cargados (sin credenciales).
+ * Login, contraseña y PIN se cifran (AES-256-GCM) antes de guardarse en Mongo.
+ * Un estudiante queda marcado como "activo" si su fila trae PIN asociado.
+ *
+ * GET ?listar=1 -> lista los colegios cargados (sin credenciales), con conteo
+ * de estudiantes activos y plataformas cargadas.
  */
 export const handler = async (event) => {
   try {
@@ -30,10 +48,23 @@ export const handler = async (event) => {
 
     if (metodo === 'GET' && query.listar) {
       const col = await coleccionColegios();
-      const docs = await col.find({}, { projection: { nombre: 1, codigo: 1, provincia: 1 } }).toArray();
+      const docs = await col
+        .find({}, { projection: { 'estudiantes.login': 0, 'estudiantes.contrasena': 0, 'estudiantes.pin': 0, 'docentes.login': 0, 'docentes.contrasena': 0, 'docentes.pin': 0 } })
+        .toArray();
       return respuestaJson(
         200,
-        docs.map((d) => ({ id: d._id, codigo: d.codigo, nombre: d.nombre, provincia: d.provincia }))
+        docs.map((d) => ({
+          id: d._id,
+          codigo: d.codigo,
+          nombre: d.nombre,
+          region: d.region,
+          ciudad: d.ciudad,
+          canton: d.canton,
+          plataformas: [...new Set([...(d.estudiantes || []), ...(d.docentes || [])].map((r) => r.plataforma).filter(Boolean))],
+          estudiantes: (d.estudiantes || []).length,
+          estudiantesActivos: contarActivos(d.estudiantes),
+          docentes: (d.docentes || []).length,
+        }))
       );
     }
 
@@ -43,13 +74,23 @@ export const handler = async (event) => {
     const raw = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
     const body = JSON.parse(raw);
 
-    const { idColegio, codigoColegio, nombreColegio, provincia, archivoBase64, nombreArchivo } = body;
-    const faltantes = ['idColegio', 'codigoColegio', 'nombreColegio', 'archivoBase64'].filter(
+    const { idColegio, codigoColegio, nombreColegio, region, canton, archivoBase64, nombreArchivo } = body;
+    const ciudad = body.ciudad || body.provincia; // "Ciudad (Provincia)": se aceptan ambos nombres
+
+    const faltantes = ['idColegio', 'codigoColegio', 'nombreColegio', 'plataforma', 'archivoBase64'].filter(
       (campo) => !body[campo]
     );
     if (faltantes.length > 0) {
       return respuestaJson(400, { error: `Faltan campos obligatorios: ${faltantes.join(', ')}` });
     }
+
+    const plataforma = normalizar(body.plataforma);
+    if (!config.plataformasPermitidas.includes(plataforma)) {
+      return respuestaJson(400, {
+        error: `Plataforma "${body.plataforma}" no permitida. Solo se cargan credenciales de: ${config.plataformasPermitidas.join(', ')}`,
+      });
+    }
+
     if (nombreArchivo && !/\.(xlsx|xlsm|xltx|xltm)$/i.test(nombreArchivo)) {
       return respuestaJson(400, { error: 'El archivo debe ser Excel (.xlsx)' });
     }
@@ -57,7 +98,31 @@ export const handler = async (event) => {
     const buffer = Buffer.from(archivoBase64, 'base64');
     const datos = parsearExcelCredenciales(buffer);
 
+    // Marca plataforma + activo (activo = tiene PIN asociado) y cifra las
+    // credenciales antes de tocar la base.
+    const preparar = (registros) =>
+      registros.map((r) => ({
+        ...r,
+        plataforma,
+        activo: Boolean(r.pin && String(r.pin).trim() !== ''),
+        login: cifrar(r.login, config.cifrado.clave),
+        contrasena: cifrar(r.contrasena, config.cifrado.clave),
+        pin: cifrar(r.pin, config.cifrado.clave),
+      }));
+
+    const nuevosDocentes = preparar(datos.docentes);
+    const nuevosEstudiantes = preparar(datos.estudiantes);
+
     const col = await coleccionColegios();
+
+    // Carga progresiva: conserva los registros de las OTRAS plataformas y
+    // reemplaza solo los de la plataforma de esta carga.
+    const existente = await col.findOne({ _id: idColegio });
+    const conservarOtras = (lista = []) => lista.filter((r) => r.plataforma && r.plataforma !== plataforma);
+
+    const docentes = [...conservarOtras(existente?.docentes), ...nuevosDocentes];
+    const estudiantes = [...conservarOtras(existente?.estudiantes), ...nuevosEstudiantes];
+
     const resultado = await col.updateOne(
       { _id: idColegio },
       {
@@ -65,10 +130,17 @@ export const handler = async (event) => {
           codigo: codigoColegio,
           nombre: nombreColegio,
           nombreNormalizado: normalizar(nombreColegio),
-          provincia: provincia || 'n/a',
-          provinciaNormalizada: normalizar(provincia || 'n/a'),
-          docentes: datos.docentes,
-          estudiantes: datos.estudiantes,
+          region: region || 'n/a',
+          regionNormalizada: normalizar(region || 'n/a'),
+          ciudad: ciudad || 'n/a',
+          ciudadNormalizada: normalizar(ciudad || 'n/a'),
+          // compat: código previo usaba "provincia" — se mantiene como espejo de ciudad
+          provincia: ciudad || 'n/a',
+          provinciaNormalizada: normalizar(ciudad || 'n/a'),
+          canton: canton || 'n/a',
+          cantonNormalizado: normalizar(canton || 'n/a'),
+          docentes,
+          estudiantes,
           hojasProcesadas: datos.hojasProcesadas,
           actualizadoEn: new Date(),
         },
@@ -80,10 +152,16 @@ export const handler = async (event) => {
       id: idColegio,
       codigo: codigoColegio,
       nombre: nombreColegio,
-      provincia: provincia || 'n/a',
+      region: region || 'n/a',
+      ciudad: ciudad || 'n/a',
+      canton: canton || 'n/a',
+      plataforma,
       hojasProcesadas: datos.hojasProcesadas,
-      docentes: datos.docentes.length,
-      estudiantes: datos.estudiantes.length,
+      docentesCargados: nuevosDocentes.length,
+      estudiantesCargados: nuevosEstudiantes.length,
+      estudiantesActivos: contarActivos(nuevosEstudiantes),
+      totalDocentesColegio: docentes.length,
+      totalEstudiantesColegio: estudiantes.length,
       creado: resultado.upsertedId !== null,
     });
   } catch (err) {

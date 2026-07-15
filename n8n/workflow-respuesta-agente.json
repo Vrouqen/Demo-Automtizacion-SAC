@@ -1,0 +1,125 @@
+{
+  "name": "Soporte SAC - Respuesta de agente digital (flujo 2)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] }
+      },
+      "id": "trigger-respuestas",
+      "name": "Outlook Trigger - respuestas de agentes",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "notes": "Mismo buzón de soporte que el flujo 1 (los agentes responden al correo de delegación, que salió de ese buzón). Duplica para las 4 cuentas igual que en el flujo 1.",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.subject ?? '' }}",
+              "rightValue": "CASO-",
+              "operator": { "type": "string", "operation": "contains" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-es-respuesta-agente",
+      "name": "IF: asunto contiene CASO-",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "notes": "Solo procesa correos con código de caso en el asunto (respuestas de agentes digitales). El resto lo maneja el flujo 1."
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    asunto: $json.subject ?? '',\n    respuesta: $json.body?.content ?? $json.bodyPreview ?? '',\n    correoAgente: $json.from?.emailAddress?.address ?? '',\n  },\n}];"
+      },
+      "id": "code-payload-agente",
+      "name": "Code: armar payload respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://REEMPLAZAR-CON-TU-FUNCTION-URL.lambda-url.us-east-2.on.aws/?accion=respuesta_agente",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "http-cerebro-respuesta",
+      "name": "HTTP Request -> cerebro (respuesta_agente)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "notes": "Misma Function URL del cerebro que en el flujo 1, con ?accion=respuesta_agente. El cerebro extrae el CASO-XXXXXX del asunto, marca el caso resuelto y devuelve hiloId/mensajeId del correo ORIGINAL del cliente + textoRespuesta ya formateado."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "OK",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-caso-ok",
+      "name": "IF: caso encontrado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 0],
+      "notes": "Si status != OK (caso no encontrado o ya resuelto) no se responde nada al cliente; revisa la ejecución en n8n."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $json.mensajeId }}",
+        "message": "={{ $json.textoRespuesta }}"
+      },
+      "id": "outlook-reply-cliente",
+      "name": "Outlook: Reply al cliente (hilo original)",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1100, 0],
+      "notes": "Responde sobre el mensajeId del correo ORIGINAL del cliente: la respuesta del agente cae en el mismo hilo donde el cliente escribió al inicio.",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
+      }
+    }
+  ],
+  "connections": {
+    "Outlook Trigger - respuestas de agentes": {
+      "main": [[{ "node": "IF: asunto contiene CASO-", "type": "main", "index": 0 }]]
+    },
+    "IF: asunto contiene CASO-": {
+      "main": [[{ "node": "Code: armar payload respuesta", "type": "main", "index": 0 }], []]
+    },
+    "Code: armar payload respuesta": {
+      "main": [[{ "node": "HTTP Request -> cerebro (respuesta_agente)", "type": "main", "index": 0 }]]
+    },
+    "HTTP Request -> cerebro (respuesta_agente)": {
+      "main": [[{ "node": "IF: caso encontrado", "type": "main", "index": 0 }]]
+    },
+    "IF: caso encontrado": {
+      "main": [[{ "node": "Outlook: Reply al cliente (hilo original)", "type": "main", "index": 0 }], []]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}
