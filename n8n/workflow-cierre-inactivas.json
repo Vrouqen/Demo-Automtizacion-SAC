@@ -1,0 +1,116 @@
+{
+  "name": "Soporte SAC - Cierre por inactividad (24h)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] }
+      },
+      "id": "trigger-cron-cierre",
+      "name": "Schedule Trigger (cada hora)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "notes": "Corre cada hora. El cerebro cierra las conversaciones que llevan >24h esperando respuesta del usuario; este workflow solo entrega el correo de cierre a cada una."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "accion", "value": "cerrar_inactivas" },
+            { "name": "horas", "value": "24" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-cerrar-inactivas",
+      "name": "HTTP: cerrar_inactivas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "notes": "GET ?accion=cerrar_inactivas&horas=24. El cerebro marca esas conversaciones como cerrado_inactividad y devuelve { cerradas, casos:[{ hiloId, mensajeId, remitente, textoRespuesta }] }. Idempotente: en la proxima corrida ya no las devuelve."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "casos",
+        "options": {}
+      },
+      "id": "split-casos",
+      "name": "Split Out: casos",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [440, 0],
+      "notes": "Convierte el array 'casos' en un item por caso. Si no hay casos, no salen items y el flujo termina sin enviar nada."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.mensajeId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-hay-mensajeid",
+      "name": "IF: hay mensajeId",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 0],
+      "notes": "Solo se puede responder en el hilo original si tenemos el mensajeId del ultimo correo del usuario. Sin el (caso raro), se omite el envio para no crear un hilo suelto. true = se puede responder."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $json.mensajeId }}",
+        "message": "={{ $json.textoRespuesta }}",
+        "additionalFields": { "replyToSenderOnly": true }
+      },
+      "id": "outlook-reply-cierre",
+      "name": "Outlook: Reply cierre (mismo hilo)",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [880, -60],
+      "notes": "Responde en el hilo original avisando que se cierra el caso por falta de respuesta. El texto lo genera el cerebro.",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Cierre por inactividad (24h)\n1. Schedule Trigger corre cada hora.\n2. HTTP GET ?accion=cerrar_inactivas&horas=24: el cerebro cierra en Mongo las conversaciones 'esperando_usuario' con >24h sin respuesta y devuelve los casos a avisar.\n3. Split Out separa cada caso.\n4. IF exige mensajeId para poder responder en el hilo original.\n5. Outlook responde el correo de cierre.\n\nEl estado y el cierre los maneja el cerebro (idempotente): si el usuario responde antes de las 24h, la conversacion vuelve a 'abierto'/otro estado y ya no entra aqui.",
+        "height": 300,
+        "width": 400
+      },
+      "id": "sticky-notas-cierre",
+      "name": "Notas",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, 180]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (cada hora)": {
+      "main": [[{ "node": "HTTP: cerrar_inactivas", "type": "main", "index": 0 }]]
+    },
+    "HTTP: cerrar_inactivas": {
+      "main": [[{ "node": "Split Out: casos", "type": "main", "index": 0 }]]
+    },
+    "Split Out: casos": {
+      "main": [[{ "node": "IF: hay mensajeId", "type": "main", "index": 0 }]]
+    },
+    "IF: hay mensajeId": {
+      "main": [[{ "node": "Outlook: Reply cierre (mismo hilo)", "type": "main", "index": 0 }], []]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}

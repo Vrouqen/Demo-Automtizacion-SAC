@@ -16,7 +16,9 @@ export async function obtenerOCrearConversacion({ hiloId, remitente, cuentaSopor
         remitente,
         cuentaSoporte,
         asunto,
+        estado: 'abierto',
         creadoEn: new Date(),
+        actualizadoEn: new Date(),
         mensajes: [],
         tickets: [],
         eventos: [],
@@ -31,12 +33,75 @@ export async function obtenerOCrearConversacion({ hiloId, remitente, cuentaSopor
 
 export async function registrarMensaje(hiloId, mensaje) {
   const col = await coleccionConversaciones();
-  await col.updateOne({ _id: hiloId }, { $push: { mensajes: { ...mensaje, fecha: new Date() } } });
+  await col.updateOne(
+    { _id: hiloId },
+    { $push: { mensajes: { ...mensaje, fecha: new Date() } }, $set: { actualizadoEn: new Date() } }
+  );
 }
 
 export async function registrarEvento(hiloId, evento) {
   const col = await coleccionConversaciones();
-  await col.updateOne({ _id: hiloId }, { $push: { eventos: { ...evento, fecha: new Date() } } });
+  await col.updateOne(
+    { _id: hiloId },
+    { $push: { eventos: { ...evento, fecha: new Date() } }, $set: { actualizadoEn: new Date() } }
+  );
+}
+
+/**
+ * Estados de una conversación:
+ *  abierto | esperando_usuario | esperando_agente | resuelto | cerrado |
+ *  cerrado_inactividad.
+ * Solo 'esperando_usuario' es candidato al cierre automático por 24h.
+ */
+export async function actualizarEstado(hiloId, estado) {
+  const col = await coleccionConversaciones();
+  await col.updateOne({ _id: hiloId }, { $set: { estado, actualizadoEn: new Date() } });
+}
+
+/**
+ * Cierra las conversaciones que quedaron 'esperando_usuario' sin respuesta por
+ * más de `horas`. Devuelve los datos que n8n necesita para enviar el correo de
+ * cierre (mensajeId del ÚLTIMO correo del usuario, para responder en su hilo).
+ */
+export async function cerrarConversacionesInactivas({ horas = 24 } = {}) {
+  const col = await coleccionConversaciones();
+  const limite = new Date(Date.now() - horas * 3600 * 1000);
+  const pendientes = await col
+    .find({ estado: 'esperando_usuario', actualizadoEn: { $lt: limite } })
+    .toArray();
+
+  const texto =
+    'Estimado/a usuario/a:\n\n' +
+    'No recibimos la información que necesitábamos para continuar con su solicitud, por lo que ' +
+    'cerramos este caso por el momento. Si aún necesita ayuda, puede responder a este mismo correo ' +
+    'y con gusto lo retomamos.\n\n' +
+    'Soporte Santillana Ecuador';
+
+  const casos = [];
+  for (const conv of pendientes) {
+    const ultimoUsuario = [...(conv.mensajes || [])]
+      .reverse()
+      .find((m) => m.rol === 'usuario' && m.mensajeId);
+
+    await col.updateOne(
+      { _id: conv._id },
+      {
+        $set: { estado: 'cerrado_inactividad', actualizadoEn: new Date() },
+        $push: {
+          mensajes: { rol: 'asistente', cuerpo: texto, fecha: new Date() },
+          eventos: { tipo: 'cerrado_por_inactividad', detalle: { horas }, fecha: new Date() },
+        },
+      }
+    );
+
+    casos.push({
+      hiloId: conv._id,
+      mensajeId: ultimoUsuario?.mensajeId || null,
+      remitente: conv.remitente,
+      textoRespuesta: texto,
+    });
+  }
+  return casos;
 }
 
 export async function registrarTicket(hiloId, ticket) {

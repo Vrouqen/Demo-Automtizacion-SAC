@@ -50,7 +50,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://REEMPLAZAR-CON-TU-FUNCTION-URL.lambda-url.us-east-2.on.aws/?accion=respuesta_agente",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/?accion=respuesta_agente",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",

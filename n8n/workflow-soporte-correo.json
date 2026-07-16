@@ -10,9 +10,9 @@
       "type": "n8n-nodes-base.microsoftOutlookTrigger",
       "typeVersion": 1,
       "position": [0, 0],
-      "notes": "Configura el buzón soporte1@empresa.com. Duplica este nodo 3 veces para soporte2/3/4.",
+      "notes": "Cuenta de soporte del piloto. El Code de abajo tolera el modo Simplify encendido o apagado; para que llegue el cuerpo COMPLETO del correo (no solo el preview), conviene apagar Simplify.",
       "credentials": {
-        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte" }
       }
     },
     {
@@ -35,11 +35,11 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [220, 0],
-      "notes": "Los correos con 'CASO-' en el asunto son respuestas de agentes digitales a casos escalados: los procesa el flujo 2 (workflow-respuesta-agente.json), NO este. Salida true = correo normal de cliente."
+      "notes": "Los correos con 'CASO-' en el asunto son respuestas de agentes digitales: los procesa el flujo 2 (workflow-respuesta-agente.json). Salida true = correo normal de cliente."
     },
     {
       "parameters": {
-        "jsCode": "return [{\n  json: {\n    hiloId: $json.conversationId,\n    mensajeId: $json.id,\n    remitente: $json.from?.emailAddress?.address ?? '',\n    cuentaSoporte: $json.toRecipients?.[0]?.emailAddress?.address ?? '',\n    asunto: $json.subject ?? '',\n    cuerpo: $json.body?.content ?? $json.bodyPreview ?? '',\n    adjuntos: [],\n  },\n}];"
+        "jsCode": "const m = $json;\n\n// El trigger de Outlook puede entregar el correo \"simplificado\" (from es un\n// string, to es [string], solo bodyPreview) o completo (from.emailAddress.address,\n// toRecipients, body.content), segun el toggle \"Simplify\" del nodo. Soporta ambos.\nconst dir = (v) => (typeof v === 'string' ? v : (v?.emailAddress?.address ?? ''));\n\nconst remitente = dir(m.from) || dir(m.sender) || '';\n\n// Correos sin remitente real (notificaciones del propio Microsoft, avisos del\n// sistema) no son consultas de clientes: se descartan para que no lleguen al\n// cerebro. Devolver [] corta el flujo para este item, sin marcarlo como error.\nif (!remitente) return [];\n\nconst cuentaSoporte =\n  (Array.isArray(m.to) ? m.to[0] : '') ||\n  (m.toRecipients?.[0]?.emailAddress?.address ?? '') ||\n  '';\n\n// Las respuestas que envia el propio asistente salen desde la cuenta de soporte;\n// si el trigger las levanta (p.ej. quedan en Enviados o el buzon es compartido),\n// no deben reprocesarse: causarian un bucle de auto-respuesta. Se descartan aqui\n// ademas de la guarda equivalente en el cerebro.\nif (cuentaSoporte && remitente.trim().toLowerCase() === cuentaSoporte.trim().toLowerCase()) return [];\n\nreturn [{\n  json: {\n    hiloId: m.conversationId,\n    mensajeId: m.id,\n    remitente,\n    cuentaSoporte,\n    asunto: m.subject ?? '',\n    cuerpo: m.body?.content ?? m.bodyPreview ?? '',\n    adjuntos: [],\n  },\n}];"
       },
       "id": "code-armar-payload",
       "name": "Code: armar payload",
@@ -50,63 +50,70 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://REEMPLAZAR-CON-TU-FUNCTION-URL.lambda-url.us-east-2.on.aws/",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $json }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {}
       },
       "id": "http-cerebro",
       "name": "HTTP Request -> cerebro",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [660, 0]
+      "position": [660, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "El cerebro devuelve 503 cuando el servicio de IA no esta disponible (cuota agotada / rate limit): en ese caso NO respondio al usuario y el correo debe reintentarse. retryOnFail da tiempo a que la cuota se recupere dentro de la misma ejecucion. Si tras los reintentos sigue fallando, la ejecucion termina en error y no se envia ninguna respuesta (mejor que responder algo incorrecto)."
     },
     {
       "parameters": {
-        "rules": {
-          "values": [
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
             {
-              "conditions": {
-                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $json.accion }}",
-                    "rightValue": "escalar",
-                    "operator": { "type": "string", "operation": "equals" }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "escalar"
+              "leftValue": "={{ $json.accion }}",
+              "rightValue": "ninguna",
+              "operator": { "type": "string", "operation": "notEquals" }
             },
             {
-              "conditions": {
-                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $json.accion }}",
-                    "rightValue": "responder_y_crear_ticket",
-                    "operator": { "type": "string", "operation": "equals" }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "responder_y_crear_ticket"
+              "leftValue": "={{ $json.accion }}",
+              "rightValue": "error_temporal",
+              "operator": { "type": "string", "operation": "notEquals" }
             }
-          ]
+          ],
+          "combinator": "and"
         },
-        "fallbackOutput": "extra",
         "options": {}
       },
-      "id": "switch-accion",
-      "name": "Switch: accion",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
+      "id": "if-hay-respuesta",
+      "name": "IF: hay respuesta",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
       "position": [880, 0],
-      "notes": "escalar: envía la delegación al agente digital y LUEGO responde al cliente. responder_y_crear_ticket: cuando Jira salga de standby, agrega aquí el nodo Jira antes del Reply."
+      "notes": "El cerebro devuelve accion='ninguna' cuando no hay nada que responder (correo duplicado ya respondido, o correo enviado por la propia cuenta de soporte). En esos casos NO se responde. 'error_temporal' normalmente llega como 503 y ni siquiera pasa por aqui; se filtra tambien por defensa. true = hay algo que responder."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.accion }}",
+              "rightValue": "escalar",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-es-escalar",
+      "name": "IF: es escalar",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 0],
+      "notes": "El cerebro devuelve accion = responder | escalar | responder_y_crear_ticket. Solo 'escalar' necesita el paso extra de delegacion; TODOS terminan respondiendo al cliente. true = escalar; false = responder / responder_y_crear_ticket."
     },
     {
       "parameters": {
@@ -117,13 +124,13 @@
         "bodyContent": "={{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.cuerpo }}"
       },
       "id": "outlook-delegacion",
-      "name": "Outlook: Enviar delegación a agente",
+      "name": "Outlook: Enviar delegacion a agente",
       "type": "n8n-nodes-base.microsoftOutlook",
       "typeVersion": 2,
-      "position": [1100, -140],
-      "notes": "Envía el caso al agente digital de servicio. El asunto trae [CASO-XXXXXX]: el agente debe responder manteniéndolo, para que el flujo 2 devuelva su respuesta al cliente en el hilo original.",
+      "position": [1340, -120],
+      "notes": "Envia el caso al agente digital. El asunto trae [CASO-XXXXXX]: el agente debe responder manteniendolo, para que el flujo 2 devuelva su respuesta al cliente en el hilo original.",
       "credentials": {
-        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte" }
       }
     },
     {
@@ -131,29 +138,30 @@
         "resource": "message",
         "operation": "reply",
         "messageId": "={{ $('Code: armar payload').item.json.mensajeId }}",
-        "message": "={{ $('HTTP Request -> cerebro').item.json.textoRespuesta }}"
+        "message": "={{ $('HTTP Request -> cerebro').item.json.textoRespuesta }}",
+        "additionalFields": { "replyToSenderOnly": true }
       },
       "id": "outlook-reply",
       "name": "Outlook: Reply (mismo hilo)",
       "type": "n8n-nodes-base.microsoftOutlook",
       "typeVersion": 2,
-      "position": [1340, 0],
-      "notes": "Verifica el nombre exacto del parámetro para el buzón (mailbox) si respondes desde soporte1@empresa.com y no desde la cuenta autenticada.",
+      "position": [1580, 0],
+      "notes": "Responde sobre el mensajeId del correo del cliente: la respuesta cae en el mismo hilo. Recibe tanto de la rama 'escalar' (via delegacion) como de la rama normal.",
       "credentials": {
-        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte1" }
+        "microsoftOutlookOAuth2Api": { "id": "REEMPLAZAR", "name": "Outlook soporte" }
       }
     },
     {
       "parameters": {
-        "content": "## Escalamiento a agente digital\nCuando el cerebro devuelve accion='escalar', este flujo:\n1. Envía el correo de delegación al agente (escalamiento.correoDelegacion.{para,asunto,cuerpo}).\n2. Responde al cliente en su mismo hilo avisando que un digital de servicio atenderá el caso.\nLa respuesta del agente la procesa el flujo 2: n8n/workflow-respuesta-agente.json.\n\n## Jira en STANDBY\nCada ticket queda en Mongo con estado 'pendiente_jira' (campo 'enlazadoA' si aplica). Cuando haya credenciales, agregar nodo Jira en la rama 'responder_y_crear_ticket'. Ver docs/SETUP_N8N.md.",
-        "height": 300,
-        "width": 360
+        "content": "## Flujo 1: correo del cliente\n1. Trigger levanta el correo del buzon de soporte.\n2. IF descarta respuestas de agentes (asunto con CASO-, esos van al flujo 2).\n3. Code arma el payload (tolera Simplify on/off; descarta correos sin remitente y los enviados por la propia cuenta de soporte).\n4. HTTP -> cerebro (Gemini decide accion + textoRespuesta). Reintenta si el cerebro devuelve 503 (IA sin cuota).\n5. IF: hay respuesta -> corta si accion='ninguna' (duplicado ya respondido / correo propio).\n6. IF: si accion='escalar', manda el correo de delegacion al agente y LUEGO responde al cliente. Si no, responde directo.\n\nRamas con respuesta terminan en 'Outlook: Reply (mismo hilo)'.\n\n## Jira en STANDBY\nCuando salga de standby, agregar el nodo Jira en la rama false (responder_y_crear_ticket) antes del Reply. Ver docs/SETUP_N8N.md.",
+        "height": 340,
+        "width": 380
       },
       "id": "sticky-notas",
       "name": "Notas",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [880, 260]
+      "position": [660, 220]
     }
   ],
   "connections": {
@@ -167,16 +175,18 @@
       "main": [[{ "node": "HTTP Request -> cerebro", "type": "main", "index": 0 }]]
     },
     "HTTP Request -> cerebro": {
-      "main": [[{ "node": "Switch: accion", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "IF: hay respuesta", "type": "main", "index": 0 }]]
     },
-    "Switch: accion": {
+    "IF: hay respuesta": {
+      "main": [[{ "node": "IF: es escalar", "type": "main", "index": 0 }], []]
+    },
+    "IF: es escalar": {
       "main": [
-        [{ "node": "Outlook: Enviar delegación a agente", "type": "main", "index": 0 }],
-        [{ "node": "Outlook: Reply (mismo hilo)", "type": "main", "index": 0 }],
+        [{ "node": "Outlook: Enviar delegacion a agente", "type": "main", "index": 0 }],
         [{ "node": "Outlook: Reply (mismo hilo)", "type": "main", "index": 0 }]
       ]
     },
-    "Outlook: Enviar delegación a agente": {
+    "Outlook: Enviar delegacion a agente": {
       "main": [[{ "node": "Outlook: Reply (mismo hilo)", "type": "main", "index": 0 }]]
     }
   },

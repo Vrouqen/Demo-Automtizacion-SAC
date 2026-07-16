@@ -1,6 +1,11 @@
 import { validarConfig } from './config.js';
 import { procesarCorreo } from './llm/agente.js';
-import { obtenerAnalitica, registrarMensaje, registrarEvento } from './services/conversaciones.js';
+import {
+  obtenerAnalitica,
+  registrarMensaje,
+  registrarEvento,
+  cerrarConversacionesInactivas,
+} from './services/conversaciones.js';
 import { contarEstudiantesActivos } from './services/busqueda.js';
 import { resolverEscalamiento, extraerCodigoCaso } from './services/escalamientos.js';
 
@@ -28,6 +33,9 @@ function parsearBody(event) {
  * GET  /?reporte=analitica           analítica agregada del piloto
  * GET  /?reporte=estudiantes_activos&idColegio=<id Pegasus>
  *                                    cantidad de estudiantes activos (activo = tiene credenciales)
+ * GET  /?accion=cerrar_inactivas&horas=24
+ *                                    cierra conversaciones esperando al usuario sin respuesta;
+ *                                    devuelve los casos a los que n8n debe enviar el correo de cierre
  */
 export const handler = async (event) => {
   try {
@@ -47,6 +55,13 @@ export const handler = async (event) => {
       }
       const resultado = await contarEstudiantesActivos({ idColegio: query.idColegio });
       return respuestaJson(resultado.status === 'OK' ? 200 : 404, resultado);
+    }
+
+    // Cierre automático por inactividad (lo invoca un workflow programado de n8n).
+    if (metodo === 'GET' && query.accion === 'cerrar_inactivas') {
+      const horas = query.horas ? Number(query.horas) : 24;
+      const casos = await cerrarConversacionesInactivas({ horas });
+      return respuestaJson(200, { cerradas: casos.length, casos });
     }
 
     // Flujo 2 de n8n: un agente digital respondió un caso escalado.
@@ -91,6 +106,13 @@ export const handler = async (event) => {
     }
 
     const resultado = await procesarCorreo(body);
+    // El servicio de IA falló (cuota agotada / rate limit / caída temporal): NO
+    // se envió respuesta al usuario. Devolvemos 503 para que n8n corte la rama de
+    // respuesta y el mismo correo se reprocese luego (el trigger lo vuelve a traer,
+    // o se reintenta), sin marcar el hilo como respondido.
+    if (resultado.accion === 'error_temporal') {
+      return respuestaJson(503, resultado);
+    }
     return respuestaJson(200, resultado);
   } catch (err) {
     console.error(err);

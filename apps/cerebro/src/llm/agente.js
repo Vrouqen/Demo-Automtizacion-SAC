@@ -3,10 +3,44 @@ import { config } from '../config.js';
 import { buscarEstudiante, buscarColegio, contarEstudiantesActivos } from '../services/busqueda.js';
 import { crearTicket } from '../services/tickets.js';
 import { crearEscalamiento } from '../services/escalamientos.js';
-import { obtenerOCrearConversacion, registrarMensaje, registrarEvento } from '../services/conversaciones.js';
+import {
+  obtenerOCrearConversacion,
+  registrarMensaje,
+  registrarEvento,
+  actualizarEstado,
+} from '../services/conversaciones.js';
 import { coleccionConversaciones } from '../db/mongo.js';
 
 const MAX_ITERACIONES_TOOLS = 6;
+
+// Estados de buscar_credenciales en los que el asistente PIDE algo al usuario y
+// queda a la espera de su respuesta (candidatos al cierre automático por 24h).
+const ESTADOS_ESPERANDO_USUARIO = new Set([
+  'HOMONIMOS',
+  'COLEGIO_NO_ENCONTRADO',
+  'ESTUDIANTE_NO_ENCONTRADO',
+  'CANDIDATOS',
+]);
+
+/**
+ * Llama a Gemini envolviendo los errores del proveedor para poder distinguir
+ * "se acabó la cuota / rate limit" del resto (y no responderle basura al usuario).
+ */
+async function generarContenido(ai, params) {
+  try {
+    return await ai.models.generateContent(params);
+  } catch (err) {
+    const msg = String(err?.message || err || '');
+    const status = err?.status ?? err?.code ?? err?.response?.status;
+    const wrapped = new Error(msg);
+    wrapped.esErrorLLM = true;
+    wrapped.esCuota =
+      status === 429 ||
+      status === 'RESOURCE_EXHAUSTED' ||
+      /quota|resource[_\s-]?exhausted|rate.?limit|too many requests|\b429\b/i.test(msg);
+    throw wrapped;
+  }
+}
 
 const TOOLS = [
   {
@@ -143,6 +177,13 @@ Usa buscar_credenciales e interpreta el resultado:
 - SIN_COLEGIOS: informa que aún no hay colegios cargados en el sistema.
 
 ## 1b. Derivación a un agente digital de servicio
+ANTES de derivar un caso de credenciales de un estudiante, asegúrate de haber recopilado TODA la
+información posible del estudiante, para que el agente humano no tenga que volver a pedirla: nombre
+completo del estudiante, nivel y paralelo, nombre(s) de la unidad educativa que se intentaron, y
+ciudad (provincia) y cantón. Si te falta algún dato clave y el usuario aún no lo dio, pídelo en tu
+respuesta y espera a que responda ANTES de derivar; no deriva un caso a medias. Solo cuando ya no
+haya más datos que pedir (o el usuario diga que no los tiene) procede con derivar_a_agente_digital,
+e incluye en resumen_caso todos esos datos.
 Cuando uses derivar_a_agente_digital, la herramienta asigna el caso a una persona del equipo y
 devuelve un código de caso. En tu respuesta al usuario: informa que su caso será atendido por un
 agente digital de servicio, menciona el código del caso, y explica que la respuesta le llegará a este
@@ -198,6 +239,10 @@ async function ejecutarTool(nombre, args, contexto) {
           tipo: `credencial_${String(resultado.status).toLowerCase()}`,
           detalle: { colegio: args.colegio, nombre: args.nombre_completo },
         });
+        // Si la búsqueda no fue directa (homónimos, colegio/estudiante no
+        // encontrado, candidatos), el asistente le pedirá algo al usuario y
+        // queda esperando su respuesta. Un OK se considera resuelto.
+        contexto.esperandoInfoUsuario = ESTADOS_ESPERANDO_USUARIO.has(String(resultado.status));
         return resultado;
       }
       case 'derivar_a_agente_digital': {
@@ -276,6 +321,7 @@ async function ejecutarTool(nombre, args, contexto) {
       }
       case 'fuera_de_alcance': {
         await registrarEvento(contexto.hiloId, { tipo: 'fuera_de_alcance', detalle: {} });
+        contexto.fueraDeAlcance = true;
         return { mensaje: 'Esta consulta no corresponde a las funciones de soporte de Santillana.' };
       }
       default:
@@ -293,11 +339,40 @@ async function ejecutarTool(nombre, args, contexto) {
  * mantenerse en memoria entre llamadas.
  */
 export async function procesarCorreo({ hiloId, mensajeId, remitente, cuentaSoporte, asunto, cuerpo, adjuntos = [] }) {
-  await obtenerOCrearConversacion({ hiloId, remitente, cuentaSoporte, asunto });
-  await registrarMensaje(hiloId, { rol: 'usuario', cuerpo, adjuntos });
+  // 0. Nunca procesar correos que salieron de la propia cuenta de soporte
+  //    (las respuestas del asistente): evita bucles de auto-respuesta.
+  if (
+    remitente &&
+    cuentaSoporte &&
+    remitente.trim().toLowerCase() === cuentaSoporte.trim().toLowerCase()
+  ) {
+    return { hiloId, accion: 'ninguna', motivo: 'remitente_es_la_cuenta_de_soporte' };
+  }
 
+  await obtenerOCrearConversacion({ hiloId, remitente, cuentaSoporte, asunto });
   const col = await coleccionConversaciones();
-  const conversacion = await col.findOne({ _id: hiloId });
+  let conversacion = await col.findOne({ _id: hiloId });
+
+  // 1. Idempotencia: no reprocesar un correo que ya fue respondido (duplicados
+  //    de entrega o re-polls del trigger). Si el mensaje ya se vio PERO no tiene
+  //    respuesta (un intento previo falló, p.ej. por cuota), se reprocesa sin
+  //    duplicar el mensaje del usuario.
+  if (mensajeId) {
+    const msgs = conversacion.mensajes || [];
+    const idxUser = msgs.findIndex((m) => m.rol === 'usuario' && m.mensajeId === mensajeId);
+    if (idxUser !== -1) {
+      const yaRespondido = msgs.slice(idxUser + 1).some((m) => m.rol === 'asistente');
+      if (yaRespondido) {
+        return { hiloId, accion: 'ninguna', duplicado: true };
+      }
+    } else {
+      await registrarMensaje(hiloId, { rol: 'usuario', mensajeId, cuerpo, adjuntos });
+      conversacion = await col.findOne({ _id: hiloId });
+    }
+  } else {
+    await registrarMensaje(hiloId, { rol: 'usuario', cuerpo, adjuntos });
+    conversacion = await col.findOne({ _id: hiloId });
+  }
 
   // Historial de solo texto (usuario/asistente); no se reintenta reproducir
   // tool calls pasados — si el modelo necesita el dato de nuevo, vuelve a
@@ -307,36 +382,80 @@ export async function procesarCorreo({ hiloId, mensajeId, remitente, cuentaSopor
     .map((m) => ({ role: m.rol === 'usuario' ? 'user' : 'model', parts: [{ text: m.cuerpo }] }));
 
   const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-  const contexto = { hiloId, mensajeId, remitente, asunto, adjuntos, ultimoTicket: null, escalamiento: null };
+  const contexto = {
+    hiloId, mensajeId, remitente, asunto, adjuntos,
+    ultimoTicket: null, escalamiento: null,
+    esperandoInfoUsuario: false, fueraDeAlcance: false,
+  };
   const generarConfig = { systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations: TOOLS }] };
 
-  let respuesta = await ai.models.generateContent({
-    model: config.gemini.modelo,
-    contents,
-    config: generarConfig,
-  });
-
-  let iteraciones = 0;
-  while (respuesta.functionCalls && respuesta.functionCalls.length > 0 && iteraciones < MAX_ITERACIONES_TOOLS) {
-    iteraciones++;
-    contents.push({ role: 'model', parts: respuesta.candidates[0].content.parts });
-
-    const partesResultado = [];
-    for (const fc of respuesta.functionCalls) {
-      const resultado = await ejecutarTool(fc.name, fc.args, contexto);
-      partesResultado.push({ functionResponse: { name: fc.name, response: resultado } });
-    }
-    contents.push({ role: 'user', parts: partesResultado });
-
-    respuesta = await ai.models.generateContent({
+  let textoFinal;
+  try {
+    let respuesta = await generarContenido(ai, {
       model: config.gemini.modelo,
       contents,
       config: generarConfig,
     });
+
+    let iteraciones = 0;
+    while (respuesta.functionCalls && respuesta.functionCalls.length > 0 && iteraciones < MAX_ITERACIONES_TOOLS) {
+      iteraciones++;
+      contents.push({ role: 'model', parts: respuesta.candidates[0].content.parts });
+
+      const partesResultado = [];
+      for (const fc of respuesta.functionCalls) {
+        const resultado = await ejecutarTool(fc.name, fc.args, contexto);
+        partesResultado.push({ functionResponse: { name: fc.name, response: resultado } });
+      }
+      contents.push({ role: 'user', parts: partesResultado });
+
+      respuesta = await generarContenido(ai, {
+        model: config.gemini.modelo,
+        contents,
+        config: generarConfig,
+      });
+    }
+    textoFinal = respuesta.text;
+  } catch (err) {
+    // 2. Se acabó la cuota / rate limit / error del proveedor de IA. NO le
+    //    respondemos basura al usuario ni marcamos el correo como respondido:
+    //    devolvemos un estado reintentable (el handler responde 503 y n8n no
+    //    envía nada; el mismo correo se reprocesará limpio en el próximo intento).
+    if (err.esErrorLLM) {
+      await registrarEvento(hiloId, {
+        tipo: err.esCuota ? 'error_llm_cuota' : 'error_llm',
+        detalle: { mensaje: String(err.message).slice(0, 300) },
+      });
+      return {
+        hiloId,
+        accion: 'error_temporal',
+        reintentable: true,
+        motivo: err.esCuota ? 'cuota_agotada' : 'error_llm',
+        mensaje: 'El servicio de IA no está disponible temporalmente (posible límite de cuota). No se envió respuesta.',
+      };
+    }
+    throw err;
   }
 
-  const textoFinal = respuesta.text || 'No pude procesar la solicitud, por favor intenta de nuevo.';
+  // Si el modelo no devolvió texto (raro, sin error del proveedor): tampoco
+  // enviamos un genérico "no pude procesar"; se trata como temporal/reintentable.
+  if (!textoFinal || !textoFinal.trim()) {
+    await registrarEvento(hiloId, { tipo: 'error_llm_sin_texto', detalle: {} });
+    return { hiloId, accion: 'error_temporal', reintentable: true, motivo: 'sin_texto' };
+  }
+
   await registrarMensaje(hiloId, { rol: 'asistente', cuerpo: textoFinal });
+
+  // Estado final de la conversación (define quién debe cerrar / esperar):
+  //  - esperando_agente: se escaló a una persona.
+  //  - cerrado: fuera de alcance (terminal, no se reabre solo).
+  //  - esperando_usuario: se le pidió info y falta que responda (cierre a 24h).
+  //  - resuelto: se entregó lo pedido (credencial, ticket, PIN...).
+  let estado = 'resuelto';
+  if (contexto.escalamiento) estado = 'esperando_agente';
+  else if (contexto.fueraDeAlcance) estado = 'cerrado';
+  else if (contexto.esperandoInfoUsuario) estado = 'esperando_usuario';
+  await actualizarEstado(hiloId, estado);
 
   // "accion" es la que usa el Switch de n8n para decidir la rama:
   //  - escalar: además de responder al usuario, enviar el correo de delegación al agente
@@ -349,6 +468,7 @@ export async function procesarCorreo({ hiloId, mensajeId, remitente, cuentaSopor
   return {
     hiloId,
     accion,
+    estado,
     textoRespuesta: textoFinal,
     ticket: contexto.ultimoTicket,
     escalamiento: contexto.escalamiento,
