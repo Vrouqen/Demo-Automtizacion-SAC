@@ -1,4 +1,5 @@
 import { coleccionConversaciones } from '../db/mongo.js';
+import { textoAHtml } from '../utils/correo.js';
 
 /**
  * Una "conversación" = un hilo de correo. Guarda mensajes (para threading y
@@ -99,6 +100,7 @@ export async function cerrarConversacionesInactivas({ horas = 24 } = {}) {
       mensajeId: ultimoUsuario?.mensajeId || null,
       remitente: conv.remitente,
       textoRespuesta: texto,
+      textoRespuestaHtml: textoAHtml(texto),
     });
   }
   return casos;

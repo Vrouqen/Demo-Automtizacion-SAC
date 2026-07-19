@@ -90,7 +90,7 @@
         "resource": "message",
         "operation": "reply",
         "messageId": "={{ $json.mensajeId }}",
-        "message": "={{ $json.textoRespuesta }}"
+        "message": "={{ $json.textoRespuestaHtml ?? $json.textoRespuesta }}"
       },
       "id": "outlook-reply-cliente",
       "name": "Outlook: Reply al cliente (hilo original)",

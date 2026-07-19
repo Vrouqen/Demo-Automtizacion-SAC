@@ -121,7 +121,7 @@
         "operation": "send",
         "toRecipients": "={{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.para }}",
         "subject": "={{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.asunto }}",
-        "bodyContent": "={{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.cuerpo }}"
+        "bodyContent": "={{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.cuerpoHtml ?? $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.cuerpo }}"
       },
       "id": "outlook-delegacion",
       "name": "Outlook: Enviar delegacion a agente",
@@ -138,7 +138,7 @@
         "resource": "message",
         "operation": "reply",
         "messageId": "={{ $('Code: armar payload').item.json.mensajeId }}",
-        "message": "={{ $('HTTP Request -> cerebro').item.json.textoRespuesta }}",
+        "message": "={{ $('HTTP Request -> cerebro').item.json.textoRespuestaHtml ?? $('HTTP Request -> cerebro').item.json.textoRespuesta }}",
         "additionalFields": { "replyToSenderOnly": true }
       },
       "id": "outlook-reply",

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { coleccionEscalamientos } from '../db/mongo.js';
+import { textoAHtml } from '../utils/correo.js';
 
 /**
  * Escalamiento = un caso que el asistente no pudo resolver (ej. colegio no
@@ -54,25 +55,30 @@ export async function crearEscalamiento({ hiloId, mensajeId, remitente, asunto, 
   };
   await col.insertOne(escalamiento);
 
+  const cuerpoDelegacion =
+    `Hola,\n\n` +
+    `El asistente automático de soporte no pudo resolver el siguiente caso y te lo delega:\n\n` +
+    `- Código del caso: ${codigo}\n` +
+    `- Usuario final: ${remitente}\n` +
+    `- Asunto original: ${asunto || '(sin asunto)'}\n` +
+    `- Motivo del escalamiento: ${motivo}\n\n` +
+    `Resumen del caso:\n\n${resumen}\n\n` +
+    `IMPORTANTE: responde a ESTE correo con la solución, manteniendo el código ${codigo} en el asunto. ` +
+    `Tu respuesta se reenviará automáticamente al usuario final en su hilo de correo original — ` +
+    `escríbela como si le hablaras directamente a él/ella.\n\n` +
+    `Soporte Santillana Ecuador (asistente automático)`;
+
   return {
     codigo,
     agenteEmail,
     // Correo de delegación listo para que n8n lo envíe tal cual.
+    // cuerpoHtml es el que debe usar el nodo de Outlook (Graph renderiza el
+    // cuerpo como HTML; con el texto plano los saltos de línea colapsan).
     correoDelegacion: {
       para: agenteEmail,
       asunto: `[${codigo}] Caso delegado por el asistente de soporte — ${asunto || 'sin asunto'}`,
-      cuerpo:
-        `Hola,\n\n` +
-        `El asistente automático de soporte no pudo resolver el siguiente caso y te lo delega:\n\n` +
-        `Código del caso: ${codigo}\n` +
-        `Usuario final: ${remitente}\n` +
-        `Asunto original: ${asunto || '(sin asunto)'}\n` +
-        `Motivo del escalamiento: ${motivo}\n\n` +
-        `Resumen del caso:\n${resumen}\n\n` +
-        `IMPORTANTE: responde a ESTE correo con la solución, manteniendo el código ${codigo} en el asunto. ` +
-        `Tu respuesta se reenviará automáticamente al usuario final en su hilo de correo original — ` +
-        `escríbela como si le hablaras directamente a él/ella.\n\n` +
-        `Soporte Santillana Ecuador (asistente automático)`,
+      cuerpo: cuerpoDelegacion,
+      cuerpoHtml: textoAHtml(cuerpoDelegacion),
     },
   };
 }
@@ -104,17 +110,20 @@ export async function resolverEscalamiento({ codigo, respuestaAgente, correoAgen
     }
   );
 
+  const textoRespuesta =
+    `Estimado/a usuario/a:\n\n` +
+    `Su caso (${codigo}) fue atendido por nuestro equipo de servicio digital. Esta es la respuesta:\n\n` +
+    `${respuestaAgente}\n\n` +
+    `Si necesita algo más, puede responder a este mismo correo.\n\n` +
+    `Soporte Santillana Ecuador`;
+
   return {
     status: 'OK',
     codigo,
     hiloId: escalamiento.hiloId,
     mensajeId: escalamiento.mensajeId,
     remitente: escalamiento.remitente,
-    textoRespuesta:
-      `Estimado/a usuario/a:\n\n` +
-      `Su caso (${codigo}) fue atendido por nuestro equipo de servicio digital. Esta es la respuesta:\n\n` +
-      `${respuestaAgente}\n\n` +
-      `Si necesita algo más, puede responder a este mismo correo.\n\n` +
-      `Soporte Santillana Ecuador`,
+    textoRespuesta,
+    textoRespuestaHtml: textoAHtml(textoRespuesta),
   };
 }

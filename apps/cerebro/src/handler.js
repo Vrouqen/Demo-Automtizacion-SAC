@@ -8,6 +8,7 @@ import {
 } from './services/conversaciones.js';
 import { contarEstudiantesActivos } from './services/busqueda.js';
 import { resolverEscalamiento, extraerCodigoCaso } from './services/escalamientos.js';
+import { limpiarCuerpoCorreo } from './utils/correo.js';
 
 function respuestaJson(statusCode, cuerpo) {
   return {
@@ -77,9 +78,12 @@ export const handler = async (event) => {
         return respuestaJson(400, { error: 'Falta el campo "respuesta" (texto del correo del agente)' });
       }
 
+      // La respuesta del agente también llega como HTML de Outlook con el
+      // hilo citado (el correo de delegación completo) debajo: se limpia para
+      // que al cliente le llegue solo lo que el agente escribió.
       const resultado = await resolverEscalamiento({
         codigo,
-        respuestaAgente: body.respuesta,
+        respuestaAgente: limpiarCuerpoCorreo(body.respuesta),
         correoAgente: body.correoAgente,
       });
 

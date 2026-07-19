@@ -11,6 +11,11 @@ export const config = {
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
     modelo: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    // Si el modelo principal agota su cuota (429/RESOURCE_EXHAUSTED), se
+    // reintenta la MISMA llamada con este modelo. En el tier gratuito cada
+    // modelo tiene cuota diaria propia, así que esto duplica el presupuesto
+    // efectivo del día. Vacío ('') para desactivar el respaldo.
+    modeloFallback: process.env.GEMINI_MODEL_FALLBACK ?? 'gemini-3.5-flash',
   },
   // Clave AES-256 (32 bytes en base64) para descifrar las credenciales que
   // apps/carga-credenciales guardó cifradas. Debe ser LA MISMA en ambas apps.

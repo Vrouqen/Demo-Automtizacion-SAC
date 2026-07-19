@@ -268,6 +268,10 @@ volver a subir los Excels).
    - `MONGODB_DB` = `sac`
    - `GEMINI_API_KEY` = tu API key de Google AI Studio
    - `GEMINI_MODEL` = `gemini-2.5-flash`
+   - `GEMINI_MODEL_FALLBACK` = `gemini-3.5-flash` (opcional; ese es el valor por defecto) — si el
+     modelo principal agota su cuota diaria (429), el cerebro reintenta la misma llamada con este
+     modelo. En el tier gratuito cada modelo tiene cuota propia, así que esto duplica el presupuesto
+     diario efectivo. Pon el valor vacío para desactivar el respaldo.
    - `CREDENCIALES_ENC_KEY` = la clave generada arriba
    - `AGENTES_DIGITALES` = correos de los agentes digitales de servicio, separados por coma
      (ej. `digital1@empresa.com,digital2@empresa.com`) — los casos escalados se reparten en
