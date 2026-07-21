@@ -16,31 +16,34 @@ que no puede resolver.
 ```
 Correo entrante (buzón compartido de soporte, Outlook 365)
         ↓
-n8n flujo 1: Outlook Trigger → filtra respuestas de agentes (asunto con "CASO-") → arma payload
+n8n (UN SOLO flujo): Outlook Trigger → Code arma payload
         ↓
 n8n: HTTP Request → apps/cerebro (AWS Lambda, Function URL)
         ↓
-cerebro: Gemini + function calling decide la intención:
-  - buscar_credenciales          → busca en Mongo (fuzzy match colegio + estudiante,
-                                    con región/ciudad/cantón para separar colegios HOMÓNIMOS)
-  - derivar_a_agente_digital     → crea un caso [CASO-XXXXXX] y lo asigna (round-robin) a un
-                                    agente digital de servicio (lista en AGENTES_DIGITALES)
-  - consultar_estudiantes_activos → estudiantes activos de un colegio (activo = tiene credenciales)
-  - crear_ticket                 → registra el ticket en Mongo (Jira real en standby)
-  - info_pin                     → mini tutorial de dónde está el PIN (impreso en el reverso del
-                                    libro "Compartir"; no tiene relación con las credenciales
-                                    cargadas por Excel)
-  - fuera_de_alcance             → respuesta fija de cortesía
+cerebro: primero decide QUÉ ES el correo:
+  - ¿Es la respuesta de un agente a un caso delegado? (se reconoce por el conversationId
+    del hilo de delegación guardado en Mongo, NO por el asunto) → devuelve la respuesta
+    del agente y el mensajeId del correo ORIGINAL del cliente.
+  - ¿Es basura? (publicidad, newsletter, buzón no-reply, aviso de ausencia, rebote)
+    → accion "ignorar": no se responde ni se gasta cuota de IA; n8n lo mueve a
+    Correo no deseado.
+  - Si no, es una consulta: Gemini + function calling decide la intención:
+      buscar_credenciales          → busca en Mongo (fuzzy match colegio + estudiante,
+                                      con región/ciudad/cantón para separar HOMÓNIMOS)
+      derivar_a_agente_digital     → crea [CASO-XXXXXX] y lo asigna (round-robin) a un
+                                      agente digital, con el caso documentado en detalle
+      consultar_estudiantes_activos → estudiantes activos de un colegio
+      crear_ticket                 → registra el ticket en Mongo (Jira real en standby)
+      info_pin                     → mini tutorial de dónde está el PIN
+      fuera_de_alcance             → respuesta fija de cortesía
         ↓
 n8n Switch según "accion":
-  - responder                → contesta el correo en el MISMO HILO (conversationId de Graph)
-  - responder_y_crear_ticket → ídem (nodo Jira se conecta aquí cuando salga de standby)
-  - escalar                  → envía el correo de DELEGACIÓN al agente digital + avisa al cliente
-                               en su mismo hilo que un digital de servicio atenderá su caso
-
-n8n flujo 2 (workflow-respuesta-agente.json): cuando el agente digital responde el correo de
-delegación (manteniendo [CASO-XXXXXX] en el asunto), el cerebro recupera el hilo ORIGINAL del
-cliente desde Mongo y n8n le responde ahí — la solución llega por el mismo hilo del correo inicial.
+  - escalar   → envía el correo de DELEGACIÓN al agente, registra el hilo de delegación
+                (?accion=registrar_delegacion) y avisa al cliente en su mismo hilo
+  - ignorar   → mueve el correo a Correo no deseado, sin responder
+  - el resto  → responde el correo sobre "mensajeIdRespuesta" (un único nodo Reply):
+                para una consulta normal es el correo entrante; para la respuesta de un
+                agente es el correo ORIGINAL del cliente, así la solución llega a su hilo.
 ```
 
 Cada conversación (hilo de correo), ticket, evento y escalamiento queda registrado en Mongo
@@ -58,8 +61,8 @@ docs/
   SETUP_N8N.md            # Guía paso a paso: Azure AD, buzones, flujo 1 y flujo 2 de n8n
   MIGRACION_MONGO_AWS.md  # Cómo mover la base de Mongo Atlas a AWS (EC2 o DocumentDB)
 n8n/
-  workflow-soporte-correo.json    # Flujo 1: correo del cliente → cerebro → respuesta/escalamiento
-  workflow-respuesta-agente.json  # Flujo 2: respuesta del agente digital → hilo original del cliente
+  workflow-soporte-correo.json    # Flujo único: todo correo → cerebro → respuesta / escalamiento
+  workflow-cierre-inactivas.json  # Programado: cierra casos sin respuesta del usuario
 ```
 
 Cada app en `apps/` es un Lambda independiente (imagen Docker) con su propio `package.json` — no
@@ -97,13 +100,20 @@ Responde: `{ hiloId, accion, textoRespuesta, ticket, escalamiento }`:
 - `escalamiento` (solo al escalar): `{ codigo, agenteEmail, correoDelegacion: { para, asunto, cuerpo } }`
   — el correo de delegación listo para que n8n lo envíe tal cual al agente digital.
 
-**`POST /?accion=respuesta_agente`** — body `{ asunto, respuesta, correoAgente }` (o `codigo`
-explícito). Extrae el `CASO-XXXXXX` del asunto, marca el caso resuelto y devuelve
-`{ hiloId, mensajeId, textoRespuesta }` del correo **original** del cliente, para responderle en su
-mismo hilo (lo usa el flujo 2 de n8n).
+**`POST /?accion=registrar_delegacion`** — body `{ codigo, conversationIdDelegacion,
+mensajeIdDelegacion }`. Lo llama n8n justo después de enviar el correo de delegación; es lo que
+permite reconocer la respuesta del agente por hilo y no por el asunto.
 
-**`GET /?reporte=analitica`** — resumen agregado: tickets por tipo/estado, eventos por tipo (incluye
-escalamientos), total de conversaciones.
+Las respuestas de los agentes **no necesitan endpoint propio**: entran por el `POST /` normal y el
+cerebro las detecta, devolviendo `accion: "responder_al_cliente"` con el `mensajeIdRespuesta` del
+correo original del cliente. (`POST /?accion=respuesta_agente` sigue existiendo por compatibilidad.)
+
+**`GET /?vista=dashboard`** — dashboard de analítica en vivo (se refresca solo cada 30 s). Se sirve
+desde la misma Function URL que los datos, así que no hace falta hosting ni dominio aparte.
+
+**`GET /?reporte=analitica[&desde=&hasta=]`** — los mismos datos en JSON. Ver *Analítica* más abajo.
+
+Ambos aceptan `&token=` y lo **exigen** si se define `DASHBOARD_TOKEN` (la Function URL es pública).
 
 **`GET /?reporte=estudiantes_activos&idColegio=<id Pegasus>`** — cantidad de estudiantes activos del
 colegio (**activo = tiene credenciales cargadas**, es decir login y contraseña), con desglose por
@@ -116,20 +126,103 @@ plataforma (Compartir/CREO).
   coincidencia difusa propia (`utils/similitud.js`). Manejo de **colegios homónimos**: si dos o más
   colegios tienen nombre igual o muy parecido, no adivina — muestra las opciones con su ciudad y
   cantón para que el remitente confirme cuál es.
-- **Colegio no encontrado (flujo de escalamiento)**: primero muestra sugerencias; si no sirven,
-  pregunta si la institución se conoce por **algún otro nombre**; si el usuario da otro nombre,
-  vuelve a buscar; solo si dice que no (o la segunda búsqueda también falla) **deriva el caso a un
-  agente digital de servicio**: se le envía un correo de delegación con el código `[CASO-XXXXXX]` y
+- **Escalamiento a un agente digital**: antes de derivar, el asistente **exige el detalle del
+  caso** (qué necesita el usuario y desde cuándo, mensaje de error, datos del estudiante, nombres
+  alternativos de la institución, qué intentó por su cuenta) para que la persona que lo atienda no
+  tenga que volver a preguntar. Para un colegio no encontrado: primero muestra sugerencias; si no
+  sirven, pregunta por **otro nombre** de la institución; si el usuario lo da, vuelve a buscar; solo
+  si dice que no (o la segunda búsqueda también falla) **deriva el caso a un agente digital**: se le envía un correo de delegación con el código `[CASO-XXXXXX]` y
   al cliente se le avisa en su mismo hilo. Cuando el agente responde, su respuesta vuelve al cliente
   **por el hilo del correo inicial** (flujo 2 de n8n).
 - **Estudiantes activos**: consulta por id de Pegasus o nombre de colegio cuántos estudiantes
   activos tiene (activo = con credenciales cargadas).
-- **Reseteo de contraseña**: **siempre** genera un ticket (nunca lo resuelve el LLM directamente).
+- **Reseteo de contraseña**: **siempre** genera un ticket (nunca lo resuelve el LLM directamente),
+  pero solo después de tener el estudiante afectado, su institución y desde cuándo no puede acceder.
 - **PIN de acceso**: toda consulta se responde con un **mini tutorial** de dónde encontrarlo (está
   impreso en el reverso del libro "Compartir"). Es el PIN del libro físico — no tiene relación con
   las credenciales que se cargan por Excel. No hay forma automática de validar un PIN.
 - **Incidencias de plataforma**: genera un ticket para el equipo de servicio digital.
 - **Fuera de alcance**: responde amablemente que no aplica.
+
+### Qué datos se piden, en qué orden, y por qué el cantón no está
+
+La lista es **la misma en los tres flujos** (credenciales, reseteo, incidencia) y está definida una
+sola vez —`DATOS_ESTUDIANTE` en `llm/agente.js`— para que el prompt y la validación no se puedan
+desincronizar:
+
+1. Nombre completo del estudiante
+2. Unidad educativa (colegio)
+3. Ciudad (provincia)
+4. Nivel
+5. Paralelo
+
+En una incidencia de plataforma se añade al final **Detalle minucioso del problema**.
+
+**El cantón no está en la lista a propósito.** La mayoría de la gente no lo sabe de memoria, así que
+pedirlo de entrada añade fricción a todas las conversaciones para resolver unas pocas. Solo se pide
+después, y únicamente si la búsqueda del colegio devuelve `HOMONIMOS` o `COLEGIO_NO_ENCONTRADO`, que
+es lo único para lo que sirve: desempatar entre colegios. Si el usuario lo da por su cuenta, se usa.
+
+### Puerta de datos mínimos (no se actúa a ciegas)
+
+El prompt pide recopilar información antes de crear un ticket o derivar un caso, pero un prompt no
+es una garantía: el modelo se saltaba el paso y prometía tickets o derivaciones con todos los campos
+en "no proporcionado". La garantía dura vive en el código (`validarDatosTicket` /
+`validarDatosDerivacion` en `llm/agente.js`):
+
+- `crear_ticket` exige **usuario afectado**, **institución** y una descripción concreta.
+- `derivar_a_agente_digital` **no puede derivar en el primer correo** salvo que el usuario ya haya
+  escrito un caso completo; y solo se salta el requisito cuando él mismo dijo que no tiene los datos.
+- Si faltan datos, la herramienta **no se ejecuta**: se devuelve `FALTA_INFORMACION` con la lista
+  exacta de lo que falta, y esa lista se le envía al usuario tal cual (respuesta redactada por
+  plantilla, así que la petición nunca se "olvida" y no cuesta cuota de IA). El hilo queda en
+  `esperando_usuario` y entra al cierre automático a las 24 h si no responde.
+
+Además, `prometeAccionNoRealizada` bloquea cualquier respuesta que anuncie un ticket o una
+derivación que no se ejecutó ("se ha generado un ticket…" sin ticket real) y obliga al modelo a
+rehacerla.
+
+### Reparto de casos entre agentes digitales
+
+El caso se asigna **al agente con menos casos abiertos** (`pendiente_agente`), no por turno rotativo.
+La diferencia importa: un agente que ya resolvió sus diez casos está libre y vuelve a ser candidato,
+mientras que quien acumula tres sin responder deja de recibir hasta descargarse. Empates: gana quien
+lleve más tiempo sin recibir un caso; y a igualdad total, orden alfabético (para que sea
+determinista y reproducible en pruebas). Ver `elegirAgenteMenosCargado` en `services/escalamientos.js`.
+
+Si la creación del caso falla (sin `AGENTES_DIGITALES`, Mongo caído), el cerebro **no responde nada**
+al usuario y devuelve 503 para que n8n reintente: prometerle un agente que no existe es peor que no
+contestar.
+
+### Firma corporativa
+
+La firma vive en un único sitio (`utils/firma.js`) y se pega automáticamente a **todas** las salidas:
+respuestas del asistente, plantillas, respuesta de un agente digital y correo de cierre. El modelo
+tiene prohibido escribir despedida; si la escribe igual, se recorta antes de pegar la canónica, de
+modo que nunca sale duplicada ni con datos de contacto inventados. El correo interno de delegación va
+sin firma comercial.
+
+Los logos (`src/assets/firma/`) tienen dos modos, según `FIRMA_LOGOS`: `url` los sirve desde la
+propia Lambda en `?logo=<slug>` y los enlaza con `<img>` (opción B, no toca n8n, requiere
+`CEREBRO_URL`); `cid` los adjunta en línea (opción A, requiere cambiar el nodo de respuesta de n8n).
+Sin la variable, la firma sale solo con texto — nunca con imágenes rotas.
+
+### Analítica y dashboard
+
+La fuente de verdad son los **eventos** que cada conversación acumula (`eventos[]`), no contadores
+agregados aparte: una métrica nueva se puede calcular hacia atrás sobre el histórico sin haberla
+previsto. `services/analitica.js` deriva de ahí:
+
+- **Embudo de resolución** y **tasa de automatización** — cuántas cerró el asistente sin una persona.
+- **Tiempos** (mediana y p90): primera respuesta, cierre del hilo, respuesta del agente digital.
+- **Credenciales**: búsquedas por resultado y tasa de acierto.
+- **Escalamientos**: por motivo y carga por agente (abiertos / resueltos / horas medias).
+- **Ruido**: correo basura filtrado por categoría, y qué porcentaje del total entrante era.
+- **Salud del sistema**: escalamientos fallidos, correos truncados, respuestas corregidas antes de
+  enviarse, acciones frenadas por falta de datos, cortes por cuota de IA.
+
+El dashboard (`?vista=dashboard`) los dibuja con selector de rango y refresco automático. Es una sola
+página autocontenida, sin dependencias externas.
 
 ### Tickets y enlazado (Jira en standby)
 

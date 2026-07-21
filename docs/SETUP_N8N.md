@@ -50,114 +50,183 @@ de la cuenta autenticada (suele aparecer como "Buzón"/"Mailbox" o un parámetro
 `soporte1@empresa.com` (y su par en cada rama, para las otras 3 cuentas). Esto varía un poco según la
 versión de n8n — si no la ves, dínoslo y ajustamos.
 
-## 4. El workflow principal (flujo 1: correo del cliente)
+## 4. El workflow (uno solo)
 
-Se incluye `n8n/workflow-soporte-correo.json` como **punto de partida** — impórtalo
-(**Workflows → Import from File**) y revisa el mapeo de campos tras importarlo, ya que algunos nombres
-de parámetros pueden variar entre versiones de n8n.
+Se incluye `n8n/workflow-soporte-correo.json` — impórtalo (**Workflows → Import from File**) y revisa
+el mapeo de campos tras importarlo, ya que algunos nombres de parámetros pueden variar entre
+versiones de n8n.
+
+> **Cambio importante respecto a versiones anteriores:** antes había *dos* workflows y el segundo
+> detectaba las respuestas de los agentes buscando la palabra `CASO-` en el asunto. Eso era frágil
+> (dos triggers sobre el mismo buzón, y el propio correo de delegación también lleva `CASO-` en el
+> asunto). **Ahora hay un solo workflow** y las respuestas de los agentes se reconocen por el
+> `conversationId` del hilo de delegación, guardado en Mongo. Si tenías importado
+> `workflow-respuesta-agente.json`, **elimínalo de n8n**: ya no existe.
 
 ```
-[Outlook Trigger] ──► [IF: asunto NO contiene "CASO-"] ──► [Code: armar payload] ──► [HTTP → cerebro]
-                                                                                          │
-                                                                             [Switch: accion]
-                                                             ┌────────────────────┼───────────────┐
-                                                        "escalar"    "responder_y_crear_ticket"  resto
-                                                             │                    │               │
-                                          [Outlook: Send delegación a agente]    │               │
-                                                             └──────────────► [Outlook: Reply (mismo hilo)]
+[Outlook Trigger] ──► [Code: armar payload] ──► [HTTP → cerebro] ──► [Switch: accion]
+                                                                          │
+                        ┌─────────────────────────────────┬───────────────┴──────────────┐
+                   "escalar"                         "ignorar"                      "responder"
+                        │                                 │                              │
+     [Outlook: Send delegación al agente]   [Outlook: mover a Correo                     │
+                        │                    no deseado]                                 │
+     [HTTP: registrar hilo de delegación]                       [IF: hay mensaje al que responder]
+                        └──────────────────────────────────────────────► [Outlook: Reply] ◄┘
 ```
 
-- El **IF inicial** descarta los correos cuyo asunto contiene `CASO-`: esos son respuestas de los
-  agentes digitales a casos escalados y los procesa el **flujo 2** (abajo). Sin este filtro, el
-  cerebro trataría la respuesta del agente como una consulta nueva.
-- La rama **escalar** del Switch primero envía el correo de delegación al agente digital y luego
-  responde al cliente (el `textoRespuesta` del cerebro ya le avisa que un digital de servicio
-  atenderá su caso, con el código `CASO-XXXXXX`).
+**Todos** los correos del buzón entran por el mismo trigger: consultas de clientes y respuestas de
+agentes. El cerebro distingue unas de otras y devuelve en `mensajeIdRespuesta` a qué correo hay que
+responder, así que basta **un solo nodo Reply**.
 
-El JSON exportado trae **un** trigger de ejemplo — duplícalo 3 veces (clic derecho → Duplicate) y
-cambia el buzón de cada copia para cubrir las 4 cuentas; todas conectan al mismo nodo "IF".
+Si usan varias cuentas de soporte, duplica el trigger (clic derecho → Duplicate) y cambia el buzón de
+cada copia; todas conectan al mismo nodo "Code".
+
+### Nodo "Outlook Trigger": APAGA *Simplify*
+
+> ⚠️ **Es obligatorio.** Con *Simplify* encendido, Graph no envía `body.content` y solo queda
+> `bodyPreview`, **cortado a ~255 caracteres**. El asistente no llega a leer el final del correo, así
+> que vuelve a pedir datos que el usuario sí escribió y la conversación entra en bucle. Fue
+> exactamente la causa de que, tras recibir la lista completa de datos del estudiante, el asistente
+> volviera a pedir cantón, usuario y fecha.
+>
+> El sistema ya no falla en silencio: si detecta que solo llegó el preview, marca `cuerpoTruncado`,
+> avisa al modelo de que el correo puede venir cortado y lo registra como evento `correo_truncado`,
+> que aparece en el dashboard bajo *Correos que llegaron cortados*. Pero la solución real es apagar
+> el toggle.
 
 ### Nodo "Code: armar payload"
 
-Construye el body que espera el cerebro. Lo importante:
+Construye el body que espera el cerebro:
 
 - **`hiloId` = `conversationId`** del mensaje de Outlook/Graph — Graph agrupa automáticamente todos
-  los correos de un mismo hilo bajo ese campo, así que no hace falta armar el threading a mano con
-  `Message-ID`/`References` como en IMAP puro.
-- `adjuntos`: por ahora puedes dejarlo como `[]` — la app de correo aún no reenvía el contenido de los
-  adjuntos al cerebro (eso se conecta cuando Jira salga de standby, ver nota más abajo).
-
-```js
-return [{
-  json: {
-    hiloId: $json.conversationId,
-    mensajeId: $json.id,
-    remitente: $json.from.emailAddress.address,
-    cuentaSoporte: $json.toRecipients?.[0]?.emailAddress?.address ?? '',
-    asunto: $json.subject,
-    cuerpo: $json.body.content,
-    adjuntos: [],
-  },
-}];
-```
+  los correos de un mismo hilo bajo ese campo.
+- Descarta correos sin remitente real, los que llegan sin `id` (no habría a qué responder) y los
+  enviados por la propia cuenta de soporte (evita bucles).
+- Marca `cuerpoTruncado` cuando solo llegó el preview (ver el aviso de arriba).
 
 ### Nodo "HTTP Request → cerebro"
 
-- Método: `POST`
-- URL: la Function URL de `cerebro-sac` (ver `docs/SETUP_AWS.md`)
-- Body: JSON, `{{ $json }}` (pasa el objeto completo del nodo anterior)
+- Método `POST`, URL = la Function URL de `cerebro-sac` (ver `docs/SETUP_AWS.md`).
+- Body JSON: `{{ JSON.stringify($json) }}`.
+- Tiene `retryOnFail` porque el cerebro devuelve **503** cuando la IA no está disponible (cuota
+  agotada): en ese caso no respondió nada y el correo debe reintentarse.
 
-### Nodo "Switch"
+### Nodo "Switch: accion"
 
-Rama según `{{ $json.accion }}` (el cerebro devuelve `"responder"` o `"responder_y_crear_ticket"` —
-por ahora, con Jira en standby, ambas ramas terminan igual: responder el correo. Cuando Jira se
-active, la rama `responder_y_crear_ticket` es donde se agrega el nodo nativo de Jira de n8n).
+| `accion` | Qué hace |
+|---|---|
+| `escalar` | Envía la delegación al **agente digital**, registra el hilo, y responde al cliente |
+| `ignorar` | Correo basura: lo mueve a *Correo no deseado* y **no responde** |
+| `responder_y_crear_ticket` | Avisa por correo al **equipo** (Cuentas / Servicio Digital) y responde al cliente |
+| `responder` / `responder_al_cliente` | Responde directo |
+| `ninguna` / `error_temporal` | No responde nada (duplicado, correo propio, o IA caída) |
 
-### Nodo "Outlook: Reply"
+> El Switch entrega al **primer** output que casa, por eso `responder` (la regla amplia "todo lo que
+> no sea…") va la última. Si se pone antes, se traga `responder_y_crear_ticket` y el equipo nunca
+> recibe el aviso — fue exactamente el fallo de "el ticket no le llega a nadie".
 
-- Resource: `Message`, Operation: `Reply`
-- Message ID: `{{ $('Code: armar payload').item.json.mensajeId }}` (esto es lo que hace que la
-  respuesta caiga en el mismo hilo)
-- Comentario/cuerpo: `{{ $('HTTP Request → cerebro').item.json.textoRespuesta }}`
+### Ticket ≠ Caso — son dos caminos distintos hacia una persona
 
-### Nodo "Outlook: Enviar delegación a agente" (rama escalar)
+Confundirlos hace perder mucho tiempo depurando:
 
-- Resource: `Message`, Operation: `Send`
-- To: `{{ $('HTTP Request -> cerebro').item.json.escalamiento.correoDelegacion.para }}`
-- Subject: `{{ ...escalamiento.correoDelegacion.asunto }}` (ya incluye `[CASO-XXXXXX]`)
-- Body: `{{ ...escalamiento.correoDelegacion.cuerpo }}` (ya incluye la instrucción al agente de
-  responder manteniendo el código en el asunto)
+| | **Ticket** (`responder_y_crear_ticket`) | **Caso** (`escalar`) |
+|---|---|---|
+| Cuándo | Reseteo de clave, incidencia de plataforma | El asistente no pudo resolverlo |
+| Quién lo atiende | Un **equipo**: Cuentas o Servicio Digital | Un **agente digital** concreto |
+| Cómo llega | `Outlook: Avisar ticket al equipo` | `Outlook: Enviar delegación a agente` |
+| Su respuesta | La escribe el equipo al cliente, por su cuenta | Vuelve **automáticamente** al hilo del cliente |
+| En el JSON | `ticket: {...}`, `escalamiento: null` | `escalamiento: {...}` |
+
+Si ves `"escalamiento": null` y `"accion": "responder_y_crear_ticket"`, **no hay ningún caso que
+derivar**: es un ticket, y quien debe recibirlo es el equipo, no un agente digital.
+
+`responder_al_cliente` es la respuesta de un agente devuelta al hilo original del cliente — no
+necesita rama propia porque el `mensajeIdRespuesta` ya viene resuelto por el cerebro.
+
+### Rama "ignorar": limpieza de correos basura
+
+El cerebro clasifica cada correo entrante **antes** de llamar a la IA (`utils/clasificacion.js`) y
+devuelve `accion: "ignorar"` cuando detecta:
+
+| Categoría | Ejemplo |
+|---|---|
+| `promocional` | Publicidad y newsletters ("Azure for Students", ofertas, webinars) |
+| `remitente_automatico` | `noreply@`, `notificaciones@`, `marketing@`, `postmaster@`… |
+| `envio_masivo` | Dominios de plataformas de mailing (Mailchimp, SendGrid, Marketo…) |
+| `respuesta_automatica` | "Respuesta automática", "Out of office" |
+| `rebote` | "Undeliverable", "Delivery has failed" |
+
+El filtro es deliberadamente conservador: descarta con una señal fuerte (remitente automático,
+rebote, aviso de ausencia) o con **dos** señales de publicidad, y **nunca** si el texto contiene una
+intención de soporte clara (credenciales, contraseña, PIN, colegio, estudiante…). Ante la duda,
+atiende el correo. Cada descarte se registra en los logs de la Lambda (`[basura] categoría: señal`)
+para poder afinarlo.
+
+El nodo **Outlook: mover a Correo no deseado** usa Operation `Move` con la carpeta `junkemail`
+(nombre bien conocido de Graph). Sacarlo de la bandeja de entrada evita además que el trigger lo
+vuelva a levantar. Si el buzón usa otra carpeta, selecciónala con el desplegable del nodo.
+
+### Nodos "IF: hay mensaje al que responder" y "Outlook: Reply (mismo hilo)"
+
+- IF: comprueba que el id del mensaje no venga vacío. Graph devuelve
+  `400 ErrorInvalidIdMalformed` ("Id is malformed") cuando el Message ID llega vacío o mal formado,
+  y ese error se ve como un fallo de Outlook cuando en realidad es un dato ausente aguas arriba.
+- Reply: Resource `Message`, Operation `Reply`
+- Message ID: `{{ $('HTTP Request -> cerebro').item.json.mensajeIdRespuesta || $('Code: armar payload').item.json.mensajeId }}`
+  — el respaldo cubre el caso de que el cerebro no lo devuelva (p. ej. porque el trigger no envió el
+  `id` del correo).
+- Cuerpo: `{{ $('HTTP Request -> cerebro').item.json.textoRespuestaHtml ?? ...textoRespuesta }}`
+  (el campo HTML es el que hace que los saltos de línea y las listas se vean bien en Outlook).
+
+> **Si vuelve a aparecer "Id is malformed"**, mira el JSON de salida del nodo `HTTP Request →
+> cerebro`: si `mensajeIdRespuesta` viene `null`, el problema está en el trigger (no entregó `id`),
+> no en el nodo de Outlook.
+
+### Nodos de la rama "escalar"
+
+1. **Outlook: Enviar delegación a agente** — Send, con `escalamiento.correoDelegacion.para` /
+   `.asunto` / `.cuerpoHtml`. El asunto trae `[CASO-XXXXXX] Motivo — resumen corto`, y el cuerpo
+   lleva el caso documentado por secciones (qué necesita el usuario, datos del estudiante, datos de
+   la institución, qué se intentó).
+2. **HTTP: registrar hilo de delegación** — `POST {URL-CEREBRO}/?accion=registrar_delegacion` con
+   `{ codigo, conversationIdDelegacion, mensajeIdDelegacion }`. **Este es el paso clave del
+   enrutado**: guarda el hilo del correo recién enviado para reconocer después la respuesta del
+   agente. Está configurado con *continue on error*: si falla, el sistema aún funciona por el
+   respaldo del código en el asunto.
 
 La lista de correos de los agentes vive en la variable de entorno `AGENTES_DIGITALES` de la Lambda
-`cerebro-sac` (ver `docs/SETUP_AWS.md`, paso 6) — el cerebro asigna cada caso en round-robin.
-**Cuando tengan la lista real de correos de los digitales de servicio, solo hay que actualizar esa
-variable; n8n no cambia.**
+`cerebro-sac` (ver `docs/SETUP_AWS.md`, paso 6) — el cerebro asigna cada caso **al agente con menos
+casos abiertos**. **Cuando tengan la lista real de los digitales de servicio, solo hay que actualizar
+esa variable; n8n no cambia.**
 
-## 5. Flujo 2: respuesta del agente digital → cliente (mismo hilo original)
+> **Si el caso se crea pero el agente no recibe nada**, revisa en este orden:
+> 1. `AGENTES_DIGITALES` está definida y no vacía en la Lambda. Sin ella la creación del caso falla;
+>    desde esta versión eso devuelve **503 y no se responde nada al usuario** (antes el usuario
+>    recibía un "le atenderá un agente digital" y el caso no existía).
+> 2. La salida del nodo `HTTP Request → cerebro` trae `accion: "escalar"`. Si trae `"responder"`, el
+>    caso no llegó a crearse: mira los logs de CloudWatch, sale como `[escalamiento] no se pudo crear`.
+> 3. El nodo *Outlook: Enviar delegación a agente* tiene credenciales válidas.
+>
+> El dashboard muestra estos fallos en *Salud del sistema → Escalamientos que fallaron*.
 
-Importa `n8n/workflow-respuesta-agente.json`. Este flujo cierra el círculo del escalamiento:
+## 5. Cómo vuelve la respuesta del agente al cliente
 
-```
-[Outlook Trigger (mismo buzón)] ──► [IF: asunto contiene "CASO-"] ──► [Code: payload]
-        ──► [HTTP POST cerebro?accion=respuesta_agente] ──► [IF: status OK]
-        ──► [Outlook: Reply al cliente sobre el mensajeId ORIGINAL]
-```
+1. Al escalar, el cerebro guarda en Mongo (colección `escalamientos`) el `hiloId` y el `mensajeId`
+   del correo **original del cliente**, bajo el código `CASO-XXXXXX`.
+2. n8n envía la delegación y registra el `conversationId` de ese correo nuevo.
+3. El agente responde a la delegación. Ese correo entra por el **mismo trigger** que todo lo demás.
+4. El cerebro ve que el `conversationId` entrante corresponde a un hilo de delegación pendiente →
+   marca el caso como resuelto y devuelve `mensajeIdRespuesta` = el del correo **original del
+   cliente**, junto con la respuesta del agente ya limpia (sin el correo de delegación citado).
+5. El nodo Reply responde ahí: la solución le llega al cliente **en el hilo donde escribió**.
 
-Cómo funciona el retorno por el hilo inicial:
+Ventaja frente al esquema anterior: **el agente puede cambiar el asunto por completo** y el sistema
+lo sigue reconociendo. El código en el asunto queda solo para lectura humana y como respaldo (ese
+respaldo, además, solo acepta el correo si viene de una dirección de `AGENTES_DIGITALES`).
 
-1. Al escalar, el cerebro guardó en Mongo (colección `escalamientos`) el `hiloId` y el `mensajeId`
-   del correo original del cliente, bajo el código `CASO-XXXXXX`.
-2. El agente responde al correo de delegación; como mantiene `[CASO-XXXXXX]` en el asunto, este
-   flujo lo detecta.
-3. El endpoint `?accion=respuesta_agente` extrae el código del asunto, marca el caso como resuelto y
-   devuelve `{ hiloId, mensajeId, textoRespuesta }` — donde `mensajeId` es el del correo **original
-   del cliente**.
-4. El nodo final hace Reply sobre ese `mensajeId`: la respuesta del agente le llega al cliente **en
-   el mismo hilo** donde escribió al principio.
-
-> Si el agente responde SIN el código en el asunto, el flujo no lo detecta (queda en la salida false
-> del IF). El correo de delegación se lo advierte explícitamente; aun así conviene revisar
-> ocasionalmente los casos `pendiente_agente` en la colección `escalamientos`.
+> Para revisar casos que quedaron sin respuesta, consulta la colección `escalamientos` filtrando por
+> `estado: "pendiente_agente"`.
 
 ## 6. Jira — placeholder para cuando salga de standby
 
@@ -183,3 +252,48 @@ tengan las credenciales del Jira externo:
 
 Puedes armar un nodo HTTP Request + Schedule Trigger en n8n para traer cualquiera de los dos
 periódicamente a una hoja de Google Sheets o a un dashboard, sin tocar el cerebro.
+
+## Firma corporativa en las respuestas
+
+**La firma NO se configura en n8n.** La añade el cerebro en `textoRespuestaHtml` (y en
+`textoRespuesta` para la versión de texto plano), así que sale idéntica en todas las salidas:
+respuestas del asistente, respuesta de un agente digital y correo de cierre por inactividad. Si se
+pusiera en n8n habría que repetirla en cada nodo de envío y se desincronizaría a la primera.
+
+Se edita en `apps/cerebro/src/utils/firma.js` (dirección, teléfonos, correo y webs).
+
+### Logos — dos modos (`FIRMA_LOGOS`)
+
+Los PNG viven en `apps/cerebro/src/assets/firma/` (ver su `LEEME.md`). Hay dos formas de mostrarlos,
+según la variable `FIRMA_LOGOS` de la Lambda:
+
+**Opción B — `FIRMA_LOGOS=url` (recomendada, la activa).** La propia Lambda sirve cada logo en
+`{URL-CEREBRO}/?logo=santillana` (imagen estática, pública, caché de un año) y la firma los enlaza
+con `<img src="…">`. **No hay que tocar n8n.** Requiere una variable más, `CEREBRO_URL`, con la
+Function URL de la Lambda (la misma que usa n8n). Contra: Outlook de escritorio oculta las imágenes
+externas hasta que el usuario pulsa "Descargar imágenes"; hasta entonces se ve el texto alternativo.
+Es el compromiso aceptado: el 90 % del valor de la firma (dirección, teléfonos, webs) ya está en el
+texto y no depende de las imágenes.
+
+**Opción A — `FIRMA_LOGOS=cid`.** Los logos viajan adjuntos y se ven aunque el cliente bloquee
+imágenes externas, pero el nodo *Microsoft Outlook* de n8n no expone `contentId`/`isInline`, así que
+hay que sustituir el nodo `Outlook: Reply` por llamadas directas a Graph (createReply → PATCH →
+attachments → send). Solo vale la pena si "Descargar imágenes" resulta molesto en la práctica.
+
+**Vacío / sin definir.** Firma solo con texto, sin ninguna etiqueta `<img>`.
+
+Para la opción B, en la Lambda `cerebro-sac`:
+```
+FIRMA_LOGOS = url
+CEREBRO_URL = https://TU-FUNCTION-URL.lambda-url.us-east-2.on.aws
+```
+Compruébalo abriendo `{URL-CEREBRO}/?logo=santillana` en el navegador: debe descargar/mostrar el PNG.
+
+## Dashboard de analítica
+
+`https://{URL-CEREBRO}/?vista=dashboard` — no requiere despliegue aparte: lo sirve la misma Lambda.
+Se refresca solo cada 30 s y trae selector de rango (7 / 30 / 90 días / todo).
+
+Como la Function URL es pública, define `DASHBOARD_TOKEN` en la Lambda y entra con
+`?vista=dashboard&token=EL-TOKEN`; la página lo propaga sola al pedir los datos. Sin la variable
+definida, el dashboard queda abierto a cualquiera que conozca la URL.

@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Analítica · Soporte Santillana Ecuador</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series-1: #2a78d6;
+    --series-2: #008300;
+    --ord-1: #86b6ef;
+    --ord-2: #5598e7;
+    --ord-3: #2a78d6;
+    --ord-4: #1c5cab;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-1: #3987e5;
+      --ord-1: #9ec5f4;
+      --ord-2: #6da7ec;
+      --ord-3: #3987e5;
+      --ord-4: #184f95;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --ord-1: #9ec5f4;
+    --ord-2: #6da7ec;
+    --ord-3: #3987e5;
+    --ord-4: #184f95;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .envoltorio { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+
+  header.cabecera { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  .subtitulo { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
+  .controles { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controles button {
+    font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary); cursor: pointer;
+  }
+  .controles button[aria-pressed="true"] { background: var(--series-1); border-color: var(--series-1); color: #fff; font-weight: 600; }
+  .controles button:hover:not([aria-pressed="true"]) { color: var(--text-primary); }
+
+  .tarjeta { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+  h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .nota { color: var(--text-muted); font-size: 12px; margin: 0 0 14px; }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi .etiqueta { color: var(--text-secondary); font-size: 12px; }
+  .kpi .valor { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; margin-top: 4px; }
+  .kpi .pie { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .kpi.destacado .valor { font-size: 42px; color: var(--series-1); }
+
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .ancho-total { grid-column: 1 / -1; }
+
+  .barras { display: flex; flex-direction: column; gap: 8px; }
+  .fila { display: grid; grid-template-columns: minmax(130px, 44%) 1fr auto; gap: 10px; align-items: center; }
+  .fila .rotulo { color: var(--text-secondary); font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
+  /* display:block es obligatorio: como <span> inline, el ancho porcentual de la
+     barra hija no se resuelve y todas las barras salen de 0px. */
+  .pista { display: block; background: var(--grid); border-radius: 4px; height: 14px; overflow: hidden; }
+  .barra { display: block; height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; transition: width .25s ease; }
+  .fila .cifra { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text-primary); min-width: 34px; text-align: right; }
+  .fila:hover .rotulo, .fila:hover .cifra { color: var(--text-primary); font-weight: 600; }
+
+  .leyenda { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; color: var(--text-secondary); }
+  .leyenda span { display: inline-flex; align-items: center; gap: 6px; }
+  .punto { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  .salud { display: flex; flex-direction: column; gap: 2px; }
+  .salud .item { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--grid); }
+  .salud .item:last-child { border-bottom: 0; }
+  .salud .icono { width: 18px; text-align: center; font-size: 13px; flex: none; }
+  .salud .texto { flex: 1; color: var(--text-secondary); }
+  .salud .n { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; padding: 6px 0; }
+  .desplazable { overflow-x: auto; }
+
+  .vacio { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
+  .pie-pagina { color: var(--text-muted); font-size: 12px; margin-top: 20px; text-align: center; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .tip {
+    position: fixed; pointer-events: none; z-index: 10; opacity: 0; transition: opacity .1s;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; font-size: 12px; color: var(--text-primary);
+    box-shadow: 0 4px 14px rgba(0,0,0,.14); white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera">
+    <div>
+      <h1>Analítica del asistente de soporte</h1>
+      <div class="subtitulo">Santillana Ecuador · piloto</div>
+    </div>
+    <div class="controles" role="group" aria-label="Rango de fechas">
+      <button data-dias="7">7 días</button>
+      <button data-dias="30" aria-pressed="true">30 días</button>
+      <button data-dias="90">90 días</button>
+      <button data-dias="0">Todo</button>
+      <span class="subtitulo" id="estado-carga" aria-live="polite"></span>
+    </div>
+  </header>
+
+  <section class="kpis" id="kpis"></section>
+
+  <div class="rejilla">
+    <div class="tarjeta ancho-total">
+      <h2>Conversaciones por día</h2>
+      <p class="nota">Hilos nuevos abiertos cada día.</p>
+      <div id="serie-dias"></div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Embudo de resolución</h2>
+      <p class="nota">Qué pasó con cada conversación atendida.</p>
+      <div id="embudo"></div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Búsquedas de credenciales</h2>
+      <p class="nota">Resultado de cada búsqueda en la base.</p>
+      <div id="credenciales"></div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Carga por agente digital</h2>
+      <p class="nota">Casos abiertos frente a resueltos. El reparto asigna siempre al menos cargado.</p>
+      <div class="leyenda">
+        <span><i class="punto" style="background:var(--series-1)"></i> Abiertos</span>
+        <span><i class="punto" style="background:var(--series-2)"></i> Resueltos</span>
+      </div>
+      <div id="agentes"></div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Motivos de escalamiento</h2>
+      <p class="nota">Por qué el asistente necesitó a una persona.</p>
+      <div id="motivos"></div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Correo basura filtrado</h2>
+      <p class="nota">Ruido descartado sin responder ni gastar cuota de IA.</p>
+      <div id="basura"></div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Salud del sistema</h2>
+      <p class="nota">Incidencias internas a vigilar. Lo ideal es que todo esté en cero.</p>
+      <div class="salud" id="salud"></div>
+    </div>
+  </div>
+
+  <details>
+    <summary>Ver los datos en tabla</summary>
+    <div class="tarjeta desplazable" style="margin-top:8px">
+      <table id="tabla"><tbody></tbody></table>
+    </div>
+  </details>
+
+  <p class="pie-pagina" id="pie"></p>
+</div>
+<div class="tip" id="tip" role="status"></div>
+
+<script>
+(function () {
+  const ORDINAL = ['var(--ord-4)', 'var(--ord-3)', 'var(--ord-2)', 'var(--ord-1)'];
+  const tip = document.getElementById('tip');
+  let dias = 30;
+  let ultimo = null;
+
+  const num = (n) => (n === null || n === undefined ? '—' : n.toLocaleString('es-EC'));
+  const horas = (h) => (h === null || h === undefined ? '—' : h < 1 ? Math.round(h * 60) + ' min' : h.toFixed(1) + ' h');
+
+  function mostrarTip(ev, texto) {
+    tip.textContent = texto;
+    tip.style.opacity = '1';
+    const margen = 14;
+    let x = ev.clientX + margen;
+    let y = ev.clientY + margen;
+    const r = tip.getBoundingClientRect();
+    if (x + r.width > window.innerWidth - 8) x = ev.clientX - r.width - margen;
+    if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - margen;
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  }
+  const ocultarTip = () => { tip.style.opacity = '0'; };
+
+  /** Barras horizontales: la forma correcta para comparar magnitudes con etiquetas de texto. */
+  function barras(destino, filas, opciones) {
+    const o = opciones || {};
+    const el = document.getElementById(destino);
+    const datos = filas.filter((f) => f.valor > 0 || o.mostrarCeros);
+    if (datos.length === 0) {
+      el.innerHTML = '<p class="vacio">Sin datos en este rango.</p>';
+      return;
+    }
+    const max = Math.max(...datos.map((f) => f.valor), 1);
+    const total = datos.reduce((a, f) => a + f.valor, 0);
+    el.innerHTML = '<div class="barras">' + datos.map((f, i) => {
+      const color = o.color || ORDINAL[Math.min(i, ORDINAL.length - 1)];
+      const ancho = Math.max((f.valor / max) * 100, 1.5);
+      return '<div class="fila" data-tip="' + f.rotulo + ': ' + num(f.valor) +
+        (total > 0 ? ' (' + Math.round((f.valor / total) * 100) + '% del total)' : '') + '">' +
+        '<span class="rotulo" title="' + f.rotulo + '">' + f.rotulo + '</span>' +
+        '<span class="pista"><span class="barra" style="width:' + ancho + '%;background:' + color + '"></span></span>' +
+        '<span class="cifra">' + num(f.valor) + '</span></div>';
+    }).join('') + '</div>';
+    el.querySelectorAll('.fila').forEach((fila) => {
+      fila.addEventListener('mousemove', (ev) => mostrarTip(ev, fila.dataset.tip));
+      fila.addEventListener('mouseleave', ocultarTip);
+    });
+  }
+
+  /** Barras agrupadas de dos series (abiertos / resueltos por agente). */
+  function barrasAgrupadas(destino, filas) {
+    const el = document.getElementById(destino);
+    if (filas.length === 0) {
+      el.innerHTML = '<p class="vacio">Todavía no se ha asignado ningún caso.</p>';
+      return;
+    }
+    const max = Math.max(...filas.flatMap((f) => [f.abiertos, f.resueltos]), 1);
+    el.innerHTML = '<div class="barras">' + filas.map((f) => {
+      const barra = (v, color, etiqueta) =>
+        '<div class="fila" data-tip="' + f.agente + ' · ' + etiqueta + ': ' + num(v) + '">' +
+        '<span class="rotulo" title="' + f.agente + '">' + etiqueta + '</span>' +
+        '<span class="pista"><span class="barra" style="width:' + Math.max((v / max) * 100, 1.5) + '%;background:' + color + '"></span></span>' +
+        '<span class="cifra">' + num(v) + '</span></div>';
+      return '<div style="margin-bottom:6px"><div class="rotulo" style="color:var(--text-primary);font-weight:600;margin-bottom:4px">' +
+        f.agente + (f.horasPromedioRespuesta !== null ? ' · ' + horas(f.horasPromedioRespuesta) + ' de media' : '') + '</div>' +
+        barra(f.abiertos, 'var(--series-1)', 'Abiertos') + barra(f.resueltos, 'var(--series-2)', 'Resueltos') + '</div>';
+    }).join('') + '</div>';
+    el.querySelectorAll('.fila').forEach((fila) => {
+      fila.addEventListener('mousemove', (ev) => mostrarTip(ev, fila.dataset.tip));
+      fila.addEventListener('mouseleave', ocultarTip);
+    });
+  }
+
+  /** Serie temporal: área + línea con crosshair. */
+  function serieTemporal(destino, porDia) {
+    const el = document.getElementById(destino);
+    const claves = Object.keys(porDia);
+    if (claves.length === 0) {
+      el.innerHTML = '<p class="vacio">Sin conversaciones en este rango.</p>';
+      return;
+    }
+    const W = 900, H = 200, mI = 34, mD = 8, mS = 12, mB = 26;
+    const pts = claves.map((k) => ({ dia: k, v: porDia[k] }));
+    const max = Math.max(...pts.map((p) => p.v), 1);
+    const x = (i) => mI + (pts.length === 1 ? (W - mI - mD) / 2 : (i * (W - mI - mD)) / (pts.length - 1));
+    const y = (v) => mS + (1 - v / max) * (H - mS - mB);
+    const linea = pts.map((p, i) => (i === 0 ? 'M' : 'L') + x(i).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ');
+    const area = linea + ' L' + x(pts.length - 1).toFixed(1) + ' ' + y(0) + ' L' + x(0).toFixed(1) + ' ' + y(0) + ' Z';
+    const ticks = [0, Math.round(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
+
+    el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Conversaciones por día">' +
+      ticks.map((t) => '<g><line x1="' + mI + '" x2="' + (W - mD) + '" y1="' + y(t) + '" y2="' + y(t) +
+        '" stroke="var(--grid)" stroke-width="1"/><text x="' + (mI - 8) + '" y="' + (y(t) + 4) +
+        '" text-anchor="end" font-size="11" fill="var(--text-muted)">' + t + '</text></g>').join('') +
+      '<path d="' + area + '" fill="var(--series-1)" opacity="0.12"/>' +
+      '<path d="' + linea + '" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+      pts.map((p, i) => '<circle cx="' + x(i) + '" cy="' + y(p.v) + '" r="' + (pts.length > 40 ? 0 : 3) +
+        '" fill="var(--series-1)" stroke="var(--surface-1)" stroke-width="2"/>').join('') +
+      '<text x="' + mI + '" y="' + (H - 6) + '" font-size="11" fill="var(--text-muted)">' + pts[0].dia + '</text>' +
+      (pts.length > 1 ? '<text x="' + (W - mD) + '" y="' + (H - 6) + '" text-anchor="end" font-size="11" fill="var(--text-muted)">' +
+        pts[pts.length - 1].dia + '</text>' : '') +
+      '<line id="cruz" y1="' + mS + '" y2="' + (H - mB) + '" stroke="var(--baseline)" stroke-width="1" opacity="0"/>' +
+      '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="transparent" id="captura"/></svg>';
+
+    const svg = el.querySelector('svg');
+    const cruz = el.querySelector('#cruz');
+    el.querySelector('#captura').addEventListener('mousemove', (ev) => {
+      const caja = svg.getBoundingClientRect();
+      const px = ((ev.clientX - caja.left) / caja.width) * W;
+      let mejor = 0;
+      pts.forEach((_, i) => { if (Math.abs(x(i) - px) < Math.abs(x(mejor) - px)) mejor = i; });
+      cruz.setAttribute('x1', x(mejor)); cruz.setAttribute('x2', x(mejor)); cruz.setAttribute('opacity', '1');
+      mostrarTip(ev, pts[mejor].dia + ': ' + num(pts[mejor].v) + (pts[mejor].v === 1 ? ' conversación' : ' conversaciones'));
+    });
+    el.querySelector('#captura').addEventListener('mouseleave', () => { cruz.setAttribute('opacity', '0'); ocultarTip(); });
+  }
+
+  function pintar(d) {
+    ultimo = d;
+    const t = d.tiemposHoras;
+
+    document.getElementById('kpis').innerHTML = [
+      ['destacado', 'Tasa de automatización', d.resolucion.tasaAutomatizacion + '%',
+        d.resolucion.automaticas + ' de ' + d.resolucion.atendidas + ' resueltas sin una persona'],
+      ['', 'Conversaciones', num(d.volumen.conversaciones), num(d.volumen.correosUsuario) + ' correos de usuarios'],
+      ['', 'Casos con agente', num(d.escalamientos.pendientes), num(d.escalamientos.resueltos) + ' ya resueltos'],
+      ['', 'Primera respuesta', horas(t.primeraRespuesta.mediana), 'mediana · p90 ' + horas(t.primeraRespuesta.p90)],
+      ['', 'Ruido filtrado', num(d.basura.total), d.volumen.porcentajeBasura + '% de todo lo que entró'],
+    ].map(([clase, etiqueta, valor, pie]) =>
+      '<div class="tarjeta kpi ' + clase + '"><div class="etiqueta">' + etiqueta + '</div>' +
+      '<div class="valor">' + valor + '</div><div class="pie">' + pie + '</div></div>').join('');
+
+    serieTemporal('serie-dias', d.porDia);
+
+    barras('embudo', [
+      { rotulo: 'Resueltas por el asistente', valor: d.resolucion.automaticas },
+      { rotulo: 'Escaladas a una persona', valor: d.resolucion.escaladas },
+      { rotulo: 'En curso', valor: d.resolucion.abiertas },
+      { rotulo: 'Cerradas por inactividad', valor: d.resolucion.cerradasPorInactividad },
+      { rotulo: 'Fuera de alcance', valor: d.resolucion.fueraDeAlcance },
+    ], { mostrarCeros: true });
+
+    const nombresCred = {
+      ok: 'Credencial entregada', homonimos: 'Colegios homónimos',
+      colegio_no_encontrado: 'Colegio no encontrado', estudiante_no_encontrado: 'Estudiante no encontrado',
+      candidatos: 'Varios candidatos', sin_colegios: 'Sin colegios cargados',
+    };
+    barras('credenciales', Object.entries(d.credenciales.porResultado)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => ({ rotulo: nombresCred[k] || k, valor: v })));
+
+    barrasAgrupadas('agentes', d.escalamientos.porAgente);
+
+    const nombresMotivo = {
+      colegio_no_encontrado: 'Colegio no encontrado', estudiante_no_encontrado: 'Estudiante no encontrado',
+      otro: 'Otra consulta de Santillana',
+    };
+    barras('motivos', Object.entries(d.escalamientos.porMotivo)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => ({ rotulo: nombresMotivo[k] || k, valor: v })));
+
+    const nombresBasura = {
+      promocional: 'Publicidad', remitente_automatico: 'Buzón no atendido',
+      envio_masivo: 'Envío masivo', respuesta_automatica: 'Respuesta automática', rebote: 'Rebote de entrega',
+    };
+    barras('basura', Object.entries(d.basura.porCategoria)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => ({ rotulo: nombresBasura[k] || k, valor: v })));
+
+    // Estado + icono + texto: el color nunca carga el significado solo.
+    const c = d.calidad;
+    document.getElementById('salud').innerHTML = [
+      ['Escalamientos que fallaron', c.escalamientosFallidos, true],
+      ['Correos que llegaron cortados', c.correosTruncados, true],
+      ['Respuestas corregidas antes de enviar', c.promesasSinAccionCorregidas, false],
+      ['Derivaciones frenadas por falta de datos', c.derivacionesBloqueadasPorFaltaDeInfo, false],
+      ['Tickets frenados por falta de datos', c.ticketsBloqueadosPorFaltaDeInfo, false],
+      ['Cortes por cuota de IA agotada', c.erroresLlmCuota, true],
+      ['Otros errores de IA', c.erroresLlm, true],
+    ].map(([texto, n, critico]) => {
+      const estado = n === 0 ? ['✓', 'var(--good)', 'Correcto'] :
+        critico ? ['✕', 'var(--critical)', 'Requiere atención'] : ['!', 'var(--warning)', 'Aviso'];
+      return '<div class="item"><span class="icono" style="color:' + estado[1] + '" aria-hidden="true">' + estado[0] + '</span>' +
+        '<span class="texto">' + texto + '</span><span class="n">' + num(n) + '</span>' +
+        '<span class="pie" style="color:var(--text-muted);font-size:12px;min-width:120px;text-align:right">' + estado[2] + '</span></div>';
+    }).join('');
+
+    document.getElementById('tabla').innerHTML =
+      '<tbody>' + [
+        ['Conversaciones', d.volumen.conversaciones], ['Correos de usuarios', d.volumen.correosUsuario],
+        ['Respuestas enviadas', d.volumen.respuestasAsistente], ['Correo basura descartado', d.basura.total],
+        ['Conversaciones atendidas', d.resolucion.atendidas], ['Resueltas sin persona', d.resolucion.automaticas],
+        ['Escaladas', d.resolucion.escaladas], ['Cerradas por inactividad', d.resolucion.cerradasPorInactividad],
+        ['Fuera de alcance', d.resolucion.fueraDeAlcance], ['Tasa de automatización', d.resolucion.tasaAutomatizacion + '%'],
+        ['Búsquedas de credenciales', d.credenciales.busquedas], ['Aciertos de credenciales', d.credenciales.tasaAcierto + '%'],
+        ['Tickets creados', d.tickets.total], ['Casos escalados', d.escalamientos.total],
+        ['Casos pendientes de agente', d.escalamientos.pendientes],
+        ['Mediana 1ª respuesta', horas(t.primeraRespuesta.mediana)],
+        ['p90 1ª respuesta', horas(t.primeraRespuesta.p90)],
+        ['Mediana cierre del hilo', horas(t.resolucionHilo.mediana)],
+        ['Mediana respuesta del agente', horas(t.respuestaAgente.mediana)],
+      ].map(([k, v]) => '<tr><th scope="row">' + k + '</th><td class="num">' + v + '</td></tr>').join('') + '</tbody>';
+
+    document.getElementById('pie').textContent =
+      'Datos hasta ' + new Date(d.generadoEn).toLocaleString('es-EC') + ' · se actualiza solo cada 30 s';
+  }
+
+  async function cargar() {
+    const estado = document.getElementById('estado-carga');
+    estado.textContent = 'actualizando…';
+    try {
+      const params = new URLSearchParams({ reporte: 'analitica' });
+      if (dias > 0) params.set('desde', new Date(Date.now() - dias * 86400000).toISOString());
+      // Si la página se abrió con token, los datos también lo necesitan.
+      const token = new URLSearchParams(location.search).get('token');
+      if (token) params.set('token', token);
+      const res = await fetch(location.pathname + '?' + params.toString(), { headers: { accept: 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      pintar(await res.json());
+      estado.textContent = '';
+    } catch (err) {
+      estado.textContent = 'no se pudo actualizar (' + err.message + ')';
+    }
+  }
+
+  document.querySelectorAll('.controles button').forEach((b) => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.controles button').forEach((o) => o.removeAttribute('aria-pressed'));
+      b.setAttribute('aria-pressed', 'true');
+      dias = Number(b.dataset.dias);
+      cargar();
+    });
+  });
+
+  cargar();
+  setInterval(cargar, 30000);
+})();
+</script>
+</body>
+</html>

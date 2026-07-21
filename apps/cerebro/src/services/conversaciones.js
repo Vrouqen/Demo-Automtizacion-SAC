@@ -1,5 +1,21 @@
-import { coleccionConversaciones } from '../db/mongo.js';
+import { coleccionConversaciones, coleccionDescartes } from '../db/mongo.js';
 import { textoAHtml } from '../utils/correo.js';
+import { conFirmaTexto } from '../utils/firma.js';
+
+/**
+ * Deja constancia de un correo descartado por el filtro de basura. No crea
+ * conversación (no se atiende), pero sí alimenta la analítica: sin este
+ * registro el filtro sería una caja negra imposible de afinar. Nunca debe
+ * tumbar el flujo: si el registro falla, el correo igual se descarta.
+ */
+export async function registrarDescarte({ hiloId, mensajeId, remitente, asunto, categoria, senal }) {
+  try {
+    const col = await coleccionDescartes();
+    await col.insertOne({ hiloId, mensajeId, remitente, asunto, categoria, senal, fecha: new Date() });
+  } catch (err) {
+    console.error('[descarte] no se pudo registrar:', err.message);
+  }
+}
 
 /**
  * Una "conversación" = un hilo de correo. Guarda mensajes (para threading y
@@ -75,8 +91,7 @@ export async function cerrarConversacionesInactivas({ horas = 24 } = {}) {
     'Estimado/a usuario/a:\n\n' +
     'No recibimos la información que necesitábamos para continuar con su solicitud, por lo que ' +
     'cerramos este caso por el momento. Si aún necesita ayuda, puede responder a este mismo correo ' +
-    'y con gusto lo retomamos.\n\n' +
-    'Soporte Santillana Ecuador';
+    'y con gusto lo retomamos.';
 
   const casos = [];
   for (const conv of pendientes) {
@@ -99,7 +114,7 @@ export async function cerrarConversacionesInactivas({ horas = 24 } = {}) {
       hiloId: conv._id,
       mensajeId: ultimoUsuario?.mensajeId || null,
       remitente: conv.remitente,
-      textoRespuesta: texto,
+      textoRespuesta: conFirmaTexto(texto),
       textoRespuestaHtml: textoAHtml(texto),
     });
   }
@@ -116,39 +131,4 @@ export async function obtenerUltimoTicket(hiloId) {
   const conv = await col.findOne({ _id: hiloId }, { projection: { tickets: 1 } });
   const tickets = conv?.tickets || [];
   return tickets.length > 0 ? tickets[tickets.length - 1] : null;
-}
-
-/**
- * Analítica agregada para KPIs del piloto (tickets por tipo/estado,
- * eventos por tipo, total de conversaciones).
- */
-export async function obtenerAnalitica({ desde, hasta } = {}) {
-  const col = await coleccionConversaciones();
-  const filtroFecha = {};
-  if (desde) filtroFecha.$gte = new Date(desde);
-  if (hasta) filtroFecha.$lte = new Date(hasta);
-  const match = Object.keys(filtroFecha).length > 0 ? { creadoEn: filtroFecha } : {};
-
-  const conversaciones = await col.find(match).toArray();
-
-  const resumen = {
-    totalConversaciones: conversaciones.length,
-    totalTickets: 0,
-    ticketsPorTipo: {},
-    ticketsPorEstado: {},
-    eventosPorTipo: {},
-  };
-
-  for (const conv of conversaciones) {
-    for (const t of conv.tickets || []) {
-      resumen.totalTickets++;
-      resumen.ticketsPorTipo[t.tipo] = (resumen.ticketsPorTipo[t.tipo] || 0) + 1;
-      resumen.ticketsPorEstado[t.estado] = (resumen.ticketsPorEstado[t.estado] || 0) + 1;
-    }
-    for (const e of conv.eventos || []) {
-      resumen.eventosPorTipo[e.tipo] = (resumen.eventosPorTipo[e.tipo] || 0) + 1;
-    }
-  }
-
-  return resumen;
 }

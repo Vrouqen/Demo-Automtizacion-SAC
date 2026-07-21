@@ -71,7 +71,7 @@
         "resource": "message",
         "operation": "reply",
         "messageId": "={{ $json.mensajeId }}",
-        "message": "={{ $json.textoRespuesta }}",
+        "message": "={{ $json.textoRespuestaHtml ?? $json.textoRespuesta }}",
         "additionalFields": { "replyToSenderOnly": true }
       },
       "id": "outlook-reply-cierre",

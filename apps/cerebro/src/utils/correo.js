@@ -6,6 +6,8 @@
 // si fueran del usuario. Aquí se convierte a texto y se corta el hilo citado,
 // de modo que al modelo solo llegue lo que el usuario escribió en ESTE correo.
 
+import { firmaHtml, quitarDespedida } from './firma.js';
+
 const ENTIDADES = {
   nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
   aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú',
@@ -93,9 +95,15 @@ function escaparHtml(texto) {
  * Convierte texto plano (con \n) al HTML que Outlook renderiza: párrafos con
  * margen y <br> para saltos simples. Graph interpreta el cuerpo del reply como
  * HTML, así que sin esto los \n colapsan en un solo bloque de texto.
+ *
+ * `firma: true` (por defecto) recorta la despedida que venga en el texto y pega
+ * en su lugar la firma corporativa maquetada. Los correos internos —la
+ * delegación a un agente digital— la piden en false: ahí la firma comercial
+ * sobra.
  */
-export function textoAHtml(texto) {
-  const parrafos = String(texto || '')
+export function textoAHtml(texto, { firma = true } = {}) {
+  const cuerpo = firma ? quitarDespedida(texto) : texto;
+  const parrafos = String(cuerpo || '')
     .replace(/\r/g, '')
     .split(/\n{2,}/)
     .map((p) => p.trim())
@@ -104,6 +112,7 @@ export function textoAHtml(texto) {
   return (
     `<div style="font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.5;color:#222222;">` +
     parrafos.join('') +
-    `</div>`
+    `</div>` +
+    (firma ? firmaHtml() : '')
   );
 }
