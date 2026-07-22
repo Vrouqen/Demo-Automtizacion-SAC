@@ -1,4 +1,5 @@
 import { config, validarConfig } from './config.js';
+import { extraerEmail } from './utils/correo.js';
 import { procesarCorreo } from './llm/agente.js';
 import { obtenerAnalitica } from './services/analitica.js';
 import { paginaDashboard } from './dashboard.js';
@@ -178,6 +179,15 @@ export const handler = async (event) => {
     const faltantes = ['hiloId', 'remitente', 'cuerpo'].filter((c) => !body[c]);
     if (faltantes.length > 0) {
       return respuestaJson(400, { error: `Faltan campos: ${faltantes.join(', ')}` });
+    }
+
+    // Guarda anti-bucle a nivel de handler: un correo cuyo remitente es un buzón
+    // de soporte lo enviamos nosotros. Se corta ANTES incluso de mirar si es la
+    // respuesta de un agente, porque nuestros propios avisos de ticket/delegación
+    // no deben confundirse con nada. (La misma lista protege dentro de
+    // procesarCorreo; aquí evita además tocar la colección de escalamientos.)
+    if (config.cuentasSoporte.includes(extraerEmail(body.remitente))) {
+      return respuestaJson(200, { hiloId: body.hiloId, accion: 'ninguna', motivo: 'remitente_es_un_buzon_de_soporte' });
     }
 
     // ¿Es la respuesta de un agente digital a un caso delegado? Se detecta por

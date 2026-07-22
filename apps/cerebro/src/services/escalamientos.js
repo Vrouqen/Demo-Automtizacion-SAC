@@ -35,6 +35,31 @@ export function extraerCodigoCaso(texto) {
   return m ? m[0].toUpperCase() : null;
 }
 
+// Código de una derivación en el asunto: CASO-XXX (caso) o PENDIENTE-XXX / la
+// clave real de Jira (ticket). Es el respaldo de detección si el registro del
+// conversationId falló. Exportada para pruebas.
+export function extraerCodigoDerivacion(texto) {
+  const m = String(texto || '').match(/(?:CASO|PENDIENTE|[A-Z]{2,10})-[A-Z0-9]{4,12}/i);
+  return m ? m[0].toUpperCase() : null;
+}
+
+const norm = (s) => String(s || '').trim().toLowerCase();
+
+// ¿El remitente es quien ATIENDE esta derivación (un agente digital o un buzón
+// de equipo), y no el cliente que la originó? Evita cerrar la derivación con el
+// propio texto citado por el cliente. Exportada para pruebas.
+export function esCorreoDeManejador(remitente, registro) {
+  const de = norm(remitente);
+  if (!de || de === norm(registro.remitente)) return false;
+  const candidatos = [
+    ...String(registro.agenteEmail || '').split(',').map(norm),
+    ...config.agentes.correos.map(norm),
+    norm(config.equipos?.cuentas),
+    norm(config.equipos?.servicioDigital),
+  ].filter(Boolean);
+  return candidatos.includes(de);
+}
+
 /**
  * Reparto equitativo de casos entre agentes digitales.
  *
@@ -51,12 +76,14 @@ export async function elegirAgenteMenosCargado(col) {
   const agentes = config.agentes.correos;
   if (agentes.length === 1) return agentes[0];
 
+  // Solo CASOS: los tickets van a un equipo fijo, no entran en el reparto.
+  const soloCasos = { tipo: { $ne: 'ticket' } };
   const [abiertos, ultimos] = await Promise.all([
     col.aggregate([
-      { $match: { estado: 'pendiente_agente' } },
+      { $match: { ...soloCasos, estado: 'pendiente_agente' } },
       { $group: { _id: '$agenteEmail', n: { $sum: 1 } } },
     ]).toArray(),
-    col.aggregate([{ $group: { _id: '$agenteEmail', ultimo: { $max: '$creadoEn' } } }]).toArray(),
+    col.aggregate([{ $match: soloCasos }, { $group: { _id: '$agenteEmail', ultimo: { $max: '$creadoEn' } } }]).toArray(),
   ]);
 
   const carga = new Map(abiertos.map((d) => [d._id, d.n]));
@@ -78,6 +105,7 @@ export async function cargaPorAgente() {
   const col = await coleccionEscalamientos();
   const filas = await col
     .aggregate([
+      { $match: { tipo: { $ne: 'ticket' } } }, // carga de CASOS, no de tickets
       {
         $group: {
           _id: '$agenteEmail',
@@ -155,6 +183,11 @@ export async function crearEscalamiento({
 
   const escalamiento = {
     _id: codigo,
+    // 'caso' = el asistente no pudo resolverlo (esta función). Los TICKETS crean
+    // un registro hermano con tipo 'ticket' (ver registrarDerivacionTicket): usan
+    // la MISMA maquinaria de viaje de vuelta, pero se separan en la analítica y
+    // en el reparto de carga, que son solo de casos.
+    tipo: 'caso',
     // Hilo y mensaje del correo ORIGINAL del cliente (a dónde va la respuesta).
     hiloId,
     mensajeId,
@@ -192,9 +225,61 @@ export async function crearEscalamiento({
 }
 
 /**
- * Guarda el hilo del correo de delegación que n8n acaba de enviar. Con esto,
- * la respuesta del agente se reconoce por conversationId (robusto) y no por
- * el texto del asunto (frágil).
+ * Registro de VIAJE DE VUELTA para un ticket.
+ *
+ * Un ticket (reseteo de clave, incidencia de plataforma) también necesita que la
+ * respuesta de quien lo atiende llegue de vuelta al cliente. En vez de duplicar
+ * toda la mecánica, se guarda un registro hermano del de un caso: misma colección,
+ * mismo reconocimiento por conversationId, misma resolución. Se distingue por
+ * `tipo: 'ticket'` para que NO cuente como escalamiento en la analítica ni en el
+ * reparto de casos.
+ *
+ * El _id es la clave del ticket (PENDIENTE-XXX / la de Jira), así que el aviso al
+ * equipo y este registro comparten identificador.
+ */
+export async function registrarDerivacionTicket({
+  jiraKey,
+  hiloId,
+  mensajeId,
+  remitente,
+  asuntoOriginal,
+  agenteEmail,
+  tipoTicket,
+  equipo,
+}) {
+  const col = await coleccionEscalamientos();
+  await col.updateOne(
+    { _id: jiraKey },
+    {
+      $setOnInsert: {
+        _id: jiraKey,
+        tipo: 'ticket',
+        tipoTicket: tipoTicket || null,
+        equipo: equipo || null,
+        // Correo ORIGINAL del cliente: a dónde vuelve la respuesta.
+        hiloId,
+        mensajeId,
+        remitente,
+        asuntoOriginal: asuntoOriginal || '',
+        // Buzón(es) del equipo/agente que atiende el ticket.
+        agenteEmail: agenteEmail || '',
+        estado: 'pendiente_agente',
+        conversationIdDelegacion: null,
+        mensajeIdDelegacion: null,
+        creadoEn: new Date(),
+        respuestaAgente: null,
+        respondidoEn: null,
+      },
+    },
+    { upsert: true }
+  );
+  return { status: 'OK', jiraKey };
+}
+
+/**
+ * Guarda el hilo del correo de delegación/aviso que n8n acaba de enviar. Con
+ * esto, la respuesta de quien lo atiende se reconoce por conversationId (robusto)
+ * y no por el texto del asunto (frágil). Sirve igual para casos y tickets.
  */
 export async function registrarHiloDelegacion({ codigo, conversationIdDelegacion, mensajeIdDelegacion }) {
   const col = await coleccionEscalamientos();
@@ -225,22 +310,17 @@ export async function buscarEscalamientoPendiente({ hiloId, asunto, remitente })
     if (porHilo) return porHilo;
   }
 
-  // Respaldo por código en el asunto (si el registro del hilo falló).
-  const codigo = extraerCodigoCaso(asunto);
+  // Respaldo por código en el asunto (si el registro del hilo falló). Acepta
+  // tanto CASO-XXX como la clave del ticket (PENDIENTE-XXX / Jira).
+  const codigo = extraerCodigoDerivacion(asunto);
   if (codigo) {
     const porCodigo = await col.findOne({ _id: codigo, estado: 'pendiente_agente' });
     if (!porCodigo) return null;
 
-    // Guarda: el PROPIO correo de delegación también lleva el código en el
-    // asunto, y un cliente podría citarlo al responder. Por eso el respaldo
-    // solo acepta el correo si viene de un agente digital — de lo contrario el
-    // caso se cerraría con su propio texto de delegación.
-    const de = String(remitente || '').trim().toLowerCase();
-    const esAgente =
-      de &&
-      (de === String(porCodigo.agenteEmail || '').trim().toLowerCase() ||
-        config.agentes.correos.some((c) => c.trim().toLowerCase() === de));
-    if (esAgente) return porCodigo;
+    // Guarda: el propio aviso también lleva el código en el asunto, y un cliente
+    // podría citarlo al responder. El respaldo solo acepta el correo si viene de
+    // quien ATIENDE la derivación (agente o buzón de equipo), no del cliente.
+    if (esCorreoDeManejador(remitente, porCodigo)) return porCodigo;
   }
 
   return null;
@@ -273,9 +353,15 @@ export async function resolverEscalamiento({ codigo, respuestaAgente, correoAgen
     }
   );
 
+  // El cliente no debe ver códigos internos (CASO-/PENDIENTE-): se le habla de
+  // "su solicitud". El encabezado se adapta a si fue un ticket o un caso.
+  const encabezado =
+    escalamiento.tipo === 'ticket'
+      ? 'Hemos atendido su solicitud. Esta es la respuesta de nuestro equipo:'
+      : 'Su solicitud fue atendida por nuestro equipo. Esta es la respuesta:';
   const textoRespuesta =
     `Estimado/a usuario/a:\n\n` +
-    `Su caso (${codigo}) fue atendido por nuestro equipo de servicio digital. Esta es la respuesta:\n\n` +
+    `${encabezado}\n\n` +
     `${respuestaAgente}\n\n` +
     `Si necesita algo más, puede responder a este mismo correo.`;
 

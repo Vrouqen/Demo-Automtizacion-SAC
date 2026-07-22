@@ -194,6 +194,20 @@ Si la creación del caso falla (sin `AGENTES_DIGITALES`, Mongo caído), el cereb
 al usuario y devuelve 503 para que n8n reintente: prometerle un agente que no existe es peor que no
 contestar.
 
+### Viaje de vuelta: casos y tickets funcionan igual
+
+Tanto un **caso** (el asistente no pudo resolver) como un **ticket** (reseteo de clave, incidencia)
+avisan a una persona y necesitan que su respuesta vuelva al cliente. Comparten la misma máquina
+(`services/escalamientos.js`): al crear cualquiera de los dos se guarda un registro con el hilo
+original del cliente; n8n registra el `conversationId` del aviso que envió; y cuando la persona
+responde a ese aviso, `buscarEscalamientoPendiente` lo reconoce por ese `conversationId` y
+`resolverEscalamiento` reenvía la respuesta al hilo del cliente — **sin exponerle códigos internos**.
+
+Los registros de ticket llevan `tipo: 'ticket'` para no contaminar las métricas de casos ni el
+reparto entre agentes (esos son solo de casos). Al cliente, un ticket le genera un acuse breve al
+crearse ("recibimos tu solicitud…", sin el código `PENDIENTE-XXX`) y luego la respuesta real del
+equipo por el viaje de vuelta.
+
 ### Firma corporativa
 
 La firma vive en un único sitio (`utils/firma.js`) y se pega automáticamente a **todas** las salidas:

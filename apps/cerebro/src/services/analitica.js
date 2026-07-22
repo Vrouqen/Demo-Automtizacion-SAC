@@ -72,7 +72,9 @@ export async function obtenerAnalitica({ desde, hasta } = {}) {
 
   const [conversaciones, escalamientos, descartes, agentes] = await Promise.all([
     colConv.find(rango ? { creadoEn: rango } : {}).toArray(),
-    colEsc.find(rango ? { creadoEn: rango } : {}).toArray(),
+    // Solo CASOS: los tickets viven en la misma colección (comparten el viaje de
+    // vuelta) pero se cuentan en la sección de tickets, no aquí.
+    colEsc.find({ tipo: { $ne: 'ticket' }, ...(rango ? { creadoEn: rango } : {}) }).toArray(),
     colDesc.find(rango ? { fecha: rango } : {}).toArray(),
     cargaPorAgente(),
   ]);

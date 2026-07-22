@@ -29,7 +29,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const m = $json;\n\n// El trigger de Outlook puede entregar el correo \"simplificado\" (from es un\n// string, to es [string], solo bodyPreview) o completo (from.emailAddress.address,\n// toRecipients, body.content), segun el toggle \"Simplify\" del nodo. Soporta ambos.\nconst dir = (v) => (typeof v === 'string' ? v : (v?.emailAddress?.address ?? ''));\n\nconst remitente = dir(m.from) || dir(m.sender) || '';\n\n// Correos sin remitente real (notificaciones del propio Microsoft, avisos del\n// sistema) no son consultas: se descartan. Devolver [] corta el flujo para este\n// item, sin marcarlo como error.\nif (!remitente) return [];\n\n// Sin el id del mensaje no se puede responder en el hilo: Graph exige el id\n// exacto y, si va vacio, devuelve 400 \"ErrorInvalidIdMalformed\". Se descarta\n// aqui en vez de dejar que reviente el nodo de Outlook al final del flujo.\nconst mensajeId = m.id ?? m.messageId ?? '';\nif (!mensajeId) return [];\n\nconst cuentaSoporte =\n  (Array.isArray(m.to) ? m.to[0] : '') ||\n  (m.toRecipients?.[0]?.emailAddress?.address ?? '') ||\n  '';\n\n// Las respuestas que envia el propio asistente (y los correos de delegacion)\n// salen desde la cuenta de soporte; si el trigger las levanta, no deben\n// reprocesarse: causarian bucles. Se descartan aqui y tambien en el cerebro.\nif (cuentaSoporte && remitente.trim().toLowerCase() === cuentaSoporte.trim().toLowerCase()) return [];\n\n// APAGA \"Simplify\" en el trigger. Con Simplify encendido Graph no manda\n// body.content y solo queda bodyPreview, que viene CORTADO a ~255 caracteres:\n// el asistente no llega a leer el final del correo y vuelve a pedir datos que\n// el usuario si escribio. Si pasa, se marca para dejarlo visible en la analitica.\nconst cuerpoCompleto = m.body?.content ?? '';\nconst cuerpo = cuerpoCompleto || m.bodyPreview || '';\nconst cuerpoTruncado = !cuerpoCompleto && (m.bodyPreview ?? '').length >= 250;\n\nreturn [{\n  json: {\n    hiloId: m.conversationId,\n    mensajeId,\n    remitente,\n    cuentaSoporte,\n    asunto: m.subject ?? '',\n    cuerpo,\n    cuerpoTruncado,\n    adjuntos: [],\n  },\n}];"
+        "jsCode": "const m = $json;\n\n// El trigger de Outlook puede entregar el correo \"simplificado\" (from es un\n// string, to es [string], solo bodyPreview) o completo (from.emailAddress.address,\n// toRecipients, body.content), segun el toggle \"Simplify\" del nodo. Soporta ambos.\n// email() saca la direccion limpia aunque venga como \"Nombre <correo@dominio>\".\nconst email = (v) => {\n  const s = (typeof v === 'string' ? v : (v?.emailAddress?.address ?? '')).trim();\n  const mm = s.match(/<([^>]+)>/);\n  return (mm ? mm[1] : s).trim().toLowerCase();\n};\n\nconst remitente = email(m.from) || email(m.sender) || '';\n\n// Correos sin remitente real (notificaciones del propio Microsoft, avisos del\n// sistema) no son consultas: se descartan. Devolver [] corta el flujo para este\n// item, sin marcarlo como error.\nif (!remitente) return [];\n\n// Sin el id del mensaje no se puede responder en el hilo: Graph exige el id\n// exacto y, si va vacio, devuelve 400 \"ErrorInvalidIdMalformed\". Se descarta\n// aqui en vez de dejar que reviente el nodo de Outlook al final del flujo.\nconst mensajeId = m.id ?? m.messageId ?? '';\nif (!mensajeId) return [];\n\nconst cuentaSoporte =\n  (Array.isArray(m.to) ? email(m.to[0]) : '') ||\n  email(m.toRecipients?.[0]?.emailAddress?.address) ||\n  '';\n\n// Las respuestas que envia el propio asistente (y los correos de delegacion y\n// de aviso de ticket) salen desde una cuenta de soporte; si el trigger las\n// levanta, no deben reprocesarse: causarian bucles. Este es el primer filtro;\n// el cerebro tiene ademas la lista blanca CUENTAS_SOPORTE, que atrapa tambien\n// los avisos dirigidos a un agente (cuyo 'to' NO es la cuenta de soporte).\nif (cuentaSoporte && remitente === cuentaSoporte) return [];\n\nconst cuerpoCompleto = m.body?.content ?? '';\nconst cuerpo = cuerpoCompleto || m.bodyPreview || '';\nconst cuerpoTruncado = !cuerpoCompleto && (m.bodyPreview ?? '').length >= 250;\n\nreturn [{\n  json: {\n    hiloId: m.conversationId,\n    mensajeId,\n    remitente,\n    cuentaSoporte,\n    asunto: m.subject ?? '',\n    cuerpo,\n    cuerpoTruncado,\n    adjuntos: [],\n  },\n}];"
       },
       "id": "code-armar-payload",
       "name": "Code: armar payload",
@@ -192,7 +192,10 @@
         "operation": "send",
         "toRecipients": "={{ $json.escalamiento.correoDelegacion.para }}",
         "subject": "={{ $json.escalamiento.correoDelegacion.asunto }}",
-        "bodyContent": "={{ $json.escalamiento.correoDelegacion.cuerpoHtml ?? $json.escalamiento.correoDelegacion.cuerpo }}"
+        "bodyContent": "={{ $json.escalamiento.correoDelegacion.cuerpoHtml ?? $json.escalamiento.correoDelegacion.cuerpo }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
       },
       "id": "outlook-delegacion",
       "name": "Outlook: Enviar delegacion a agente",
@@ -202,7 +205,7 @@
         880,
         -140
       ],
-      "notes": "Envia el caso al agente digital, con el detalle completo que recopilo el asistente. El asunto trae [CASO-XXXXXX] + un resumen corto.",
+      "notes": "Envia el caso al AGENTE DIGITAL, con el detalle completo que recopilo el asistente. El asunto trae [CASO-XXXXXX] + un resumen corto. El cuerpo se manda como HTML (bodyContentType=html); sin eso Outlook lo entrega como texto plano y se ven las etiquetas <div> crudas.",
       "credentials": {
         "microsoftOutlookOAuth2Api": {
           "id": "REEMPLAZAR",
@@ -237,7 +240,8 @@
         "messageId": "={{ $('HTTP Request -> cerebro').item.json.mensajeIdRespuesta || $('Code: armar payload').item.json.mensajeId }}",
         "message": "={{ $('HTTP Request -> cerebro').item.json.textoRespuestaHtml ?? $('HTTP Request -> cerebro').item.json.textoRespuesta }}",
         "additionalFields": {
-          "replyToSenderOnly": true
+          "replyToSenderOnly": true,
+          "bodyContentType": "html"
         }
       },
       "id": "outlook-reply",
@@ -322,7 +326,10 @@
         "operation": "send",
         "toRecipients": "={{ $json.ticket.correoTicket.para }}",
         "subject": "={{ $json.ticket.correoTicket.asunto }}",
-        "bodyContent": "={{ $json.ticket.correoTicket.cuerpoHtml ?? $json.ticket.correoTicket.cuerpo }}"
+        "bodyContent": "={{ $json.ticket.correoTicket.cuerpoHtml ?? $json.ticket.correoTicket.cuerpo }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
       },
       "id": "outlook-ticket-equipo",
       "name": "Outlook: Avisar ticket al equipo",
@@ -332,13 +339,33 @@
         880,
         320
       ],
-      "notes": "Mientras Jira este en STANDBY, este correo es lo UNICO que hace que el ticket llegue a una persona: sin el, el ticket se queda dormido en Mongo y al cliente ya se le dijo que 'el equipo lo atendera'. El destinatario lo resuelve el cerebro (CORREO_EQUIPO_CUENTAS / CORREO_EQUIPO_SERVICIO_DIGITAL, con AGENTES_DIGITALES de respaldo).\n\nCuando Jira se conecte, este nodo se sustituye por el nodo Jira.",
+      "notes": "Mientras Jira este en STANDBY, este correo es lo UNICO que hace que el ticket llegue a una persona: sin el, el ticket se queda dormido en Mongo y al cliente ya se le dijo que 'el equipo lo atendera'. El destinatario lo resuelve el cerebro (CORREO_EQUIPO_CUENTAS / CORREO_EQUIPO_SERVICIO_DIGITAL, con AGENTES_DIGITALES de respaldo).\n\nCuando Jira se conecte, este nodo se sustituye por el nodo Jira.\n\nEl cuerpo va como HTML (bodyContentType=html); sin eso llega con las etiquetas <div> a la vista.",
       "credentials": {
         "microsoftOutlookOAuth2Api": {
           "id": "REEMPLAZAR",
           "name": "Outlook soporte"
         }
       }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/?accion=registrar_delegacion",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ codigo: $('HTTP Request -> cerebro').item.json.ticket.jiraKey, conversationIdDelegacion: $json.conversationId, mensajeIdDelegacion: $json.id }) }}",
+        "options": {}
+      },
+      "id": "http-registrar-ticket",
+      "name": "HTTP: registrar hilo ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        320
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "VIAJE DE VUELTA DEL TICKET: guarda el conversationId del aviso recien enviado al equipo. Cuando el equipo responda a ese aviso, el cerebro lo reconoce por ese id y reenvia la respuesta al hilo original del cliente, igual que con un caso.\n\nSi falla, queda el respaldo del codigo del ticket en el asunto, por eso continua ante error."
     },
     {
       "parameters": {
@@ -457,6 +484,17 @@
       ]
     },
     "Outlook: Avisar ticket al equipo": {
+      "main": [
+        [
+          {
+            "node": "HTTP: registrar hilo ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: registrar hilo ticket": {
       "main": [
         [
           {

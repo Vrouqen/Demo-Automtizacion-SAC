@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { registrarTicket, obtenerUltimoTicket } from './conversaciones.js';
+import { registrarDerivacionTicket } from './escalamientos.js';
 import { textoAHtml } from '../utils/correo.js';
 
 const EQUIPOS = {
@@ -73,6 +74,7 @@ function armarCorreoTicket({ ticket, hiloId, asuntoOriginal, usuarioAfectado, in
  */
 export async function crearTicket({
   hiloId,
+  mensajeId,
   tipo,
   equipo,
   descripcion,
@@ -110,15 +112,28 @@ export async function crearTicket({
 
   await registrarTicket(hiloId, ticket);
 
-  return {
-    ...ticket,
-    correoTicket: armarCorreoTicket({
-      ticket,
-      hiloId,
-      asuntoOriginal,
-      usuarioAfectado,
-      institucion,
-      plataforma,
-    }),
-  };
+  const correoTicket = armarCorreoTicket({
+    ticket,
+    hiloId,
+    asuntoOriginal,
+    usuarioAfectado,
+    institucion,
+    plataforma,
+  });
+
+  // Viaje de vuelta: cuando el equipo responda al aviso, su respuesta llega sola
+  // al cliente (igual que en un caso). Sin esto, la respuesta del equipo se
+  // perdía o el sistema la malinterpretaba como una consulta nueva.
+  await registrarDerivacionTicket({
+    jiraKey: ticket.jiraKey,
+    hiloId,
+    mensajeId,
+    remitente: reportadoPor,
+    asuntoOriginal,
+    agenteEmail: correoTicket.para,
+    tipoTicket: tipo,
+    equipo,
+  });
+
+  return { ...ticket, correoTicket };
 }

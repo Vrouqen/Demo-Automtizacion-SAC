@@ -11,7 +11,7 @@ import {
   registrarDescarte,
 } from '../services/conversaciones.js';
 import { coleccionConversaciones } from '../db/mongo.js';
-import { limpiarCuerpoCorreo, textoAHtml } from '../utils/correo.js';
+import { limpiarCuerpoCorreo, textoAHtml, extraerEmail } from '../utils/correo.js';
 import { conFirmaTexto } from '../utils/firma.js';
 import { clasificarCorreoBasura } from '../utils/clasificacion.js';
 
@@ -655,6 +655,7 @@ async function ejecutarTool(nombre, args, contexto) {
 
         const ticket = await crearTicket({
           hiloId: contexto.hiloId,
+          mensajeId: contexto.mensajeId,
           tipo: args.tipo,
           equipo: args.equipo,
           descripcion: descripcionCompleta,
@@ -796,17 +797,17 @@ export function redactarRespuestaDeterminista(nombre, resultado) {
     }
     case 'crear_ticket': {
       if (!resultado.jiraKey) return null;
+      // Acuse breve al cliente. NO se muestra el código interno (PENDIENTE-XXX):
+      // es interno y poco profesional. La respuesta real del equipo llega sola a
+      // este mismo hilo (viaje de vuelta del ticket).
       const motivo =
         resultado.tipo === 'reset_password'
           ? 'el reseteo de la contraseña'
-          : 'revisar la incidencia que reportaste en la plataforma';
-      const equipo = resultado.equipo === 'cuentas' ? 'Cuentas' : 'Servicio Digital';
+          : 'la incidencia que reportaste en la plataforma';
       return (
-        `Gracias por escribirnos. Generamos el ticket ${resultado.jiraKey} para ${motivo}; ` +
-        `lo atenderá nuestro equipo de ${equipo} y la respuesta llegará a este mismo correo cuando esté resuelto.` +
-        (resultado.enlazadoA
-          ? `\n\nEste ticket quedó enlazado a tu caso anterior (${resultado.enlazadoA}).`
-          : '') +
+        `Gracias por escribirnos. Recibimos tu solicitud sobre ${motivo} y ya la estamos gestionando.\n\n` +
+        'Te responderemos por este mismo correo en cuanto tengamos la solución. Si deseas agregar más ' +
+        'información, puedes responder aquí mismo.' +
         FIRMA
       );
     }
@@ -858,11 +859,24 @@ export async function procesarCorreo({
   cuerpoTruncado = false,
 }) {
   const norm = (c) => String(c || '').trim().toLowerCase();
+  const emailRemitente = extraerEmail(remitente);
 
   // 0a. Nunca procesar correos que salieron de la propia cuenta de soporte
   //     (las respuestas del asistente): evita bucles de auto-respuesta.
-  if (remitente && cuentaSoporte && norm(remitente) === norm(cuentaSoporte)) {
+  if (emailRemitente && cuentaSoporte && emailRemitente === extraerEmail(cuentaSoporte)) {
     return { hiloId, accion: 'ninguna', motivo: 'remitente_es_la_cuenta_de_soporte' };
+  }
+
+  // 0a-bis. GUARDA ANTI-BUCLE PRINCIPAL. Los correos que ENVIAMOS nosotros (la
+  //     respuesta al cliente, el aviso de un ticket a un equipo, la delegación a
+  //     un agente) salen de un buzón de soporte. Si cualquiera de ellos vuelve a
+  //     entrar por el trigger, su remitente es ese buzón: se descarta aquí,
+  //     ANTES de crear conversación, pase lo que pase con el destinatario. La
+  //     comprobación 0a solo mira el "to", y un aviso de ticket va dirigido al
+  //     equipo (no a soporte), así que sin esta lista se colaba y el sistema se
+  //     respondía a sí mismo en bucle.
+  if (emailRemitente && config.cuentasSoporte.includes(emailRemitente)) {
+    return { hiloId, accion: 'ninguna', motivo: 'remitente_es_un_buzon_de_soporte' };
   }
 
   // El cuerpo llega de Outlook como HTML y, en las respuestas, con TODO el

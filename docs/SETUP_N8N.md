@@ -64,16 +64,23 @@ versiones de n8n.
 > `workflow-respuesta-agente.json`, **elimínalo de n8n**: ya no existe.
 
 ```
-[Outlook Trigger] ──► [Code: armar payload] ──► [HTTP → cerebro] ──► [Switch: accion]
-                                                                          │
-                        ┌─────────────────────────────────┬───────────────┴──────────────┐
-                   "escalar"                         "ignorar"                      "responder"
-                        │                                 │                              │
-     [Outlook: Send delegación al agente]   [Outlook: mover a Correo                     │
-                        │                    no deseado]                                 │
-     [HTTP: registrar hilo de delegación]                       [IF: hay mensaje al que responder]
-                        └──────────────────────────────────────────────► [Outlook: Reply] ◄┘
+[Outlook Trigger] ─► [Code: armar payload] ─► [HTTP → cerebro] ─► [Switch: accion]
+                                                                        │
+        ┌──────────────────┬──────────────────┬──────────────────┬──────┴──────┐
+   "escalar"          "crear_ticket"      "ignorar"                        "responder"
+        │                  │                  │                                 │
+ [Send delegación]  [Avisar ticket      [mover a Correo                         │
+        │            al equipo]          no deseado]                            │
+ [registrar hilo    [registrar hilo                                            │
+  de delegación]     ticket]                                                    │
+        │                  │                          [IF: hay mensaje al que responder]
+        └──────────────────┴──────────────────────────────► [Outlook: Reply] ◄─┘
 ```
+
+Las ramas **escalar** (caso) y **crear_ticket** son gemelas: ambas avisan a una persona, registran el
+`conversationId` de ese aviso, y responden al cliente. Ese registro es lo que hace el **viaje de
+vuelta**: cuando la persona responde a su aviso, el cerebro reenvía su respuesta al hilo original del
+cliente.
 
 **Todos** los correos del buzón entran por el mismo trigger: consultas de clientes y respuestas de
 agentes. El cerebro distingue unas de otras y devuelve en `mensajeIdRespuesta` a qué correo hay que
@@ -81,6 +88,30 @@ responder, así que basta **un solo nodo Reply**.
 
 Si usan varias cuentas de soporte, duplica el trigger (clic derecho → Duplicate) y cambia el buzón de
 cada copia; todas conectan al mismo nodo "Code".
+
+### ⚠️ Anti-bucle: configura `CUENTAS_SOPORTE` y vigila SOLO la Bandeja de entrada
+
+El sistema envía correos (respuesta al cliente, aviso de ticket a un equipo, delegación a un agente)
+**desde el buzón de soporte**. Si alguno de esos correos vuelve a entrar por el trigger, el sistema
+lo tomaría por una consulta nueva y **se respondería a sí mismo en bucle** — que es justo lo que pasó
+con los avisos de ticket.
+
+Dos capas de defensa, pon las dos:
+
+1. **En el Outlook Trigger, vigila solo la carpeta *Bandeja de entrada*** (Inbox), nunca *Elementos
+   enviados*. Así los correos que enviamos no se vuelven a levantar. Si tu versión de n8n no deja
+   elegir carpeta y levanta también los enviados, la capa 2 lo cubre igual.
+2. **Define `CUENTAS_SOPORTE`** en la Lambda `cerebro-sac`: la lista de las direcciones de tus buzones
+   de soporte (las que vigila n8n), separadas por coma. El cerebro descarta cualquier correo cuyo
+   remitente sea una de ellas — es nuestro propio envío. Esta capa atrapa incluso el aviso de ticket,
+   que va dirigido a un agente (su `to` **no** es la cuenta de soporte, así que la comparación normal
+   no bastaba).
+
+   ```
+   CUENTAS_SOPORTE = asistentedigitaltee@outlook.com
+   ```
+   Con varios buzones, sepáralos por coma. Si la dejas vacía, el arranque de la Lambda avisa en los
+   logs (`CUENTAS_SOPORTE está vacía`).
 
 ### Nodo "Outlook Trigger": APAGA *Simplify*
 
@@ -140,6 +171,27 @@ Confundirlos hace perder mucho tiempo depurando:
 
 Si ves `"escalamiento": null` y `"accion": "responder_y_crear_ticket"`, **no hay ningún caso que
 derivar**: es un ticket, y quien debe recibirlo es el equipo, no un agente digital.
+
+> **Un ticket genera dos correos, y eso es correcto:** al **cliente** un acuse breve en su hilo
+> ("Recibimos tu solicitud, te responderemos por este mismo correo" — **sin** el código interno), y
+> al **equipo** (nodo *Avisar ticket al equipo*) el aviso con todos los datos. No es un duplicado:
+> uno es el acuse al cliente, el otro la orden de trabajo.
+>
+> **El ticket ahora hace VIAJE DE VUELTA, igual que un caso.** Cuando el equipo (o el agente)
+> responde al aviso, el cerebro reconoce esa respuesta por el `conversationId` del aviso —registrado
+> por el nodo *HTTP: registrar hilo ticket*— y la reenvía sola al hilo original del cliente. Antes no
+> existía ese camino: la respuesta del equipo se perdía y el sistema la malinterpretaba como una
+> consulta nueva ("tu mensaje parece incompleto"). Por eso la rama de ticket tiene el mismo `registrar
+> hilo` que la de escalar.
+>
+> Si no configuras `CORREO_EQUIPO_CUENTAS` / `CORREO_EQUIPO_SERVICIO_DIGITAL`, el aviso interno cae en
+> `AGENTES_DIGITALES` como respaldo — por eso te llegaba a ti (el agente). Pon los buzones de los
+> equipos reales para que vaya a donde debe.
+
+> **Los correos internos salían con las etiquetas `<div>` a la vista:** era porque el nodo de Outlook
+> enviaba el HTML como texto plano. Ya está corregido con `bodyContentType = html` en los tres nodos
+> que envían contenido (Reply, delegación y aviso de ticket). Si tras reimportar vuelves a verlo,
+> revisa que esos nodos tengan *Additional Fields → Body Content Type = HTML*.
 
 `responder_al_cliente` es la respuesta de un agente devuelta al hilo original del cliente — no
 necesita rama propia porque el `mensajeIdRespuesta` ya viene resuelto por el cerebro.

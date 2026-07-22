@@ -22,6 +22,18 @@ function decodificarEntidades(texto) {
     .replace(/&([a-zA-Z]+);/g, (m, nombre) => ENTIDADES[nombre] ?? m);
 }
 
+/**
+ * Extrae la dirección de correo "limpia" de un remitente que puede venir como
+ * "Nombre Apellido <correo@dominio>" o ya como "correo@dominio". Se usa para
+ * comparar remitentes sin que el nombre para mostrar rompa la igualdad (de ahí
+ * que se compare siempre en minúsculas).
+ */
+export function extraerEmail(valor) {
+  const s = String(valor || '').trim();
+  const m = s.match(/<([^>]+)>/);
+  return (m ? m[1] : s).trim().toLowerCase();
+}
+
 export function pareceHtml(texto) {
   return /<\s*(html|body|div|p|br|span|table|head|meta|font)\b/i.test(String(texto || ''));
 }
