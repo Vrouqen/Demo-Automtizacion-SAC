@@ -4,6 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Carga de Credenciales SAC</title>
+<!-- Favicon: "SAC" sobre el naranja de marca, embebido como SVG (sin archivo externo). -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23d94f27'/%3E%3Ctext x='32' y='42' font-family='Segoe UI,Arial,sans-serif' font-size='26' font-weight='700' fill='white' text-anchor='middle'%3ESAC%3C/text%3E%3C/svg%3E" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23d94f27'/%3E%3Ctext x='32' y='42' font-family='Segoe UI,Arial,sans-serif' font-size='26' font-weight='700' fill='white' text-anchor='middle'%3ESAC%3C/text%3E%3C/svg%3E" />
 <style>
   :root {
     --bg: #f4f5f7;
@@ -89,9 +92,9 @@
   select:disabled { opacity: .5; cursor: not-allowed; }
   input.autollenado { border-color: var(--info); background: var(--info-soft); }
 
-  .platform-toggle { display: flex; gap: 10px; }
+  .platform-toggle { display: flex; gap: 10px; flex-wrap: wrap; }
   .platform-toggle label {
-    flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+    flex: 1 1 120px; display: flex; align-items: center; justify-content: center; gap: 8px;
     border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
     font-size: 13.5px; font-weight: 600; color: var(--text);
     cursor: pointer; background: var(--bg);
@@ -145,6 +148,34 @@
   }
   button.submit.loading .spinner { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Botón de recarga (icono) */
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; padding: 0; border-radius: 8px; cursor: pointer;
+    background: var(--bg); border: 1px solid var(--border); color: var(--text-muted);
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .icon-btn:disabled { cursor: default; opacity: .7; }
+  .icon-btn.spinning svg { animation: spin .8s linear infinite; }
+
+  /* Filtros de colegios y paginación */
+  #lista-colegios { overflow-x: auto; }
+  .col-filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+  .col-filtros input[type="search"] { flex: 1 1 240px; min-width: 160px; }
+  .col-filtros select { flex: 0 0 auto; width: auto; }
+  .paginacion {
+    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+    flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--text-muted);
+  }
+  .paginacion button {
+    font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  }
+  .paginacion button:disabled { opacity: .45; cursor: not-allowed; }
+  .paginacion button:hover:not(:disabled) { border-color: var(--accent); }
+  mark { background: var(--accent-soft); color: var(--accent-dark); border-radius: 3px; padding: 0 1px; }
 
   .banner {
     display: none; border-radius: 9px; padding: 12px 14px; font-size: 13.5px;
@@ -270,8 +301,8 @@
     <h2>Identificación</h2>
     <div class="grid" style="margin-top:14px">
       <div class="field">
-        <label for="idColegio">Id Colegio (Pegasus)</label>
-        <input type="text" id="idColegio" placeholder="COL-001" required />
+        <label for="idColegio">Id Colegio (Pegasus) <span style="font-weight:400;color:var(--text-muted)">— opcional</span></label>
+        <input type="text" id="idColegio" placeholder="COL-001 (si lo tienes)" />
       </div>
       <div class="field">
         <label for="codigoColegio">Código colegio</label>
@@ -284,6 +315,9 @@
     <div class="platform-toggle" style="margin-top:14px">
       <label><input type="radio" name="plataforma" value="compartir" checked /> Compartir</label>
       <label><input type="radio" name="plataforma" value="creo" /> CREO</label>
+      <label><input type="radio" name="plataforma" value="sumun" /> Sumun</label>
+      <label><input type="radio" name="plataforma" value="rlp" disabled /> RLP</label>
+      <label><input type="radio" name="plataforma" value="rs" disabled /> RS</label>
     </div>
 
     <hr class="sep" />
@@ -302,10 +336,23 @@
   </form>
 
   <section class="card">
-    <h2>Colegios cargados
-      <button type="button" class="link-btn" id="btn-refrescar" style="margin-left:auto">Actualizar</button>
+    <h2>Colegios cargados <span class="hint" id="col-total"></span>
+      <button type="button" class="icon-btn" id="btn-refrescar" style="margin-left:auto" title="Recargar" aria-label="Recargar">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path>
+        </svg>
+      </button>
     </h2>
+    <div class="col-filtros">
+      <input type="search" id="col-q" placeholder="Buscar por nombre, código, id, provincia o cantón…" autocomplete="off" />
+      <select id="col-limite" aria-label="Colegios por página">
+        <option value="10" selected>10 / pág.</option>
+        <option value="50">50 / pág.</option>
+        <option value="100">100 / pág.</option>
+      </select>
+    </div>
     <div id="lista-colegios" style="margin-top:14px"><p class="empty-state">Cargando…</p></div>
+    <div class="paginacion" id="col-paginacion"></div>
   </section>
 
   <footer>
@@ -672,18 +719,25 @@
         mostrarBanner(banner, 'err', '<b>No se pudo cargar:</b> ' + escapeHtml(r.datos.error || 'error desconocido'));
         return;
       }
-      var e = r.datos.estudiantes;
-      var partes = [];
-      if (e.nuevos) partes.push('<b>' + e.nuevos + '</b> nuevos');
-      if (e.actualizados) partes.push('<b>' + e.actualizados + '</b> con credenciales actualizadas');
-      if (e.sinCambios) partes.push(e.sinCambios + ' sin cambios');
+      function resumenGrupo(g, etiqueta) {
+        if (!g || !g.totalPeriodo) return '';
+        var p = [];
+        if (g.nuevos) p.push('<b>' + g.nuevos + '</b> nuevos');
+        if (g.actualizados) p.push('<b>' + g.actualizados + '</b> actualizados');
+        if (g.sinCambios) p.push(g.sinCambios + ' sin cambios');
+        return etiqueta + ': ' + (p.join(', ') || '—') + ' (total periodo: ' + g.totalPeriodo + ')';
+      }
+      var lineas = [
+        resumenGrupo(r.datos.estudiantes, 'Estudiantes'),
+        resumenGrupo(r.datos.docentes, 'Docentes'),
+      ].filter(Boolean);
       var ignoradas = (r.datos.hojasIgnoradas || []).length
-        ? ' Se ignoraron las pestañas: ' + escapeHtml(r.datos.hojasIgnoradas.join(', ')) + '.'
+        ? ' Pestañas ignoradas (sin credenciales): ' + escapeHtml(r.datos.hojasIgnoradas.join(', ')) + '.'
         : '';
       mostrarBanner(banner, 'ok',
         '<b>' + escapeHtml(r.datos.nombre) + '</b> — ' + escapeHtml(r.datos.plataforma) + ' ' +
-        escapeHtml(r.datos.periodo) + ': ' + (partes.join(', ') || 'sin registros en el archivo') +
-        '. Total del periodo: ' + e.totalPeriodo + ' estudiantes.' + ignoradas);
+        escapeHtml(r.datos.periodo) + '<br>' +
+        (lineas.join('<br>') || 'sin registros en el archivo') + ignoradas);
       var periodoPrevio = $('periodo').value;
       formCarga.reset();
       $('periodo').value = periodoPrevio; // el periodo suele repetirse entre cargas
@@ -699,38 +753,111 @@
     });
   });
 
-  // ── Listado ─────────────────────────────────────────────────────────────
+  // ── Listado con buscador + paginación ───────────────────────────────────
+  // El listado completo se carga una vez (lo necesita también el autocompletado
+  // del formulario); el buscador y la paginación operan en el cliente sobre esa
+  // lista, así que la TABLA solo dibuja una página a la vez.
   var listaEl = $('lista-colegios');
-  function cargarColegios() {
-    listaEl.innerHTML = '<p class="empty-state">Cargando…</p>';
-    return api('?listar=1').then(function (r) {
-      if (!r.ok) { listaEl.innerHTML = '<p class="empty-state">No se pudo cargar el listado.</p>'; return; }
-      colegios = Array.isArray(r.datos) ? r.datos : [];
-      if (colegios.length === 0) {
-        listaEl.innerHTML = '<p class="empty-state">Todavía no hay colegios cargados.</p>';
-        return;
-      }
-      var filas = colegios.map(function (d) {
-        var pills = (d.plataformas || []).map(function (p) {
-          return '<span class="pill">' + escapeHtml(p) + '</span>';
-        }).join('') + (d.periodos || []).map(function (p) {
-          return '<span class="pill neutro">' + escapeHtml(p) + '</span>';
-        }).join('');
-        return '<tr><td>' + escapeHtml(d.nombre) + '<br><span style="color:var(--text-muted)">' +
-          escapeHtml(d.codigo || '') + '</span></td>' +
-          '<td>' + escapeHtml(d.canton || '-') + '<br><span style="color:var(--text-muted)">' +
-          escapeHtml(d.ciudad || '') + '</span></td>' +
-          '<td>' + (pills || '<span style="color:var(--text-muted)">—</span>') + '</td>' +
-          '<td>' + d.estudiantes + '</td></tr>';
+  var paginacionEl = $('col-paginacion');
+  var btnRefrescar = $('btn-refrescar');
+  var colFiltro = { q: '', limite: 10, pagina: 1 };
+
+  function resaltarTexto(valor, q) {
+    var s = escapeHtml(valor);
+    if (!q) return s;
+    try {
+      var re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
+      return s.replace(re, '<mark>$1</mark>');
+    } catch (e) { return s; }
+  }
+
+  // Coincide contra nombre, código, id, provincia, cantón y región (sin tildes).
+  function colegioCoincide(c, q) {
+    if (!q) return true;
+    var campos = normalizar([c.nombre, c.codigo, c.id, c.ciudad, c.canton, c.region].filter(Boolean).join(' '));
+    return campos.indexOf(q) !== -1;
+  }
+
+  function renderColegios() {
+    if (colegios.length === 0) {
+      listaEl.innerHTML = '<p class="empty-state">Todavía no hay colegios cargados.</p>';
+      paginacionEl.innerHTML = '';
+      $('col-total').textContent = '';
+      return;
+    }
+    var q = normalizar(colFiltro.q);
+    var qRaw = colFiltro.q.trim();
+    var filtrados = colegios.filter(function (c) { return colegioCoincide(c, q); });
+
+    $('col-total').textContent = '— ' + filtrados.length +
+      (filtrados.length === colegios.length ? '' : ' de ' + colegios.length) +
+      (filtrados.length === 1 ? ' colegio' : ' colegios');
+
+    if (filtrados.length === 0) {
+      listaEl.innerHTML = '<p class="empty-state">Ningún colegio coincide con “' + escapeHtml(qRaw) + '”.</p>';
+      paginacionEl.innerHTML = '';
+      return;
+    }
+
+    var paginas = Math.max(Math.ceil(filtrados.length / colFiltro.limite), 1);
+    if (colFiltro.pagina > paginas) colFiltro.pagina = paginas;
+    var inicio = (colFiltro.pagina - 1) * colFiltro.limite;
+    var pagina = filtrados.slice(inicio, inicio + colFiltro.limite);
+
+    var filas = pagina.map(function (d) {
+      var pills = (d.plataformas || []).map(function (p) {
+        return '<span class="pill">' + escapeHtml(p) + '</span>';
+      }).join('') + (d.periodos || []).map(function (p) {
+        return '<span class="pill neutro">' + escapeHtml(p) + '</span>';
       }).join('');
-      listaEl.innerHTML =
-        '<table><thead><tr><th>Colegio</th><th>Ubicación</th><th>Plataformas y periodos</th>' +
-        '<th>Estudiantes</th></tr></thead><tbody>' + filas + '</tbody></table>';
+      return '<tr><td>' + resaltarTexto(d.nombre, qRaw) + '<br><span style="color:var(--text-muted)">' +
+        resaltarTexto(d.codigo || '', qRaw) + (d.id && d.id !== d.codigo ? ' · ' + resaltarTexto(d.id, qRaw) : '') + '</span></td>' +
+        '<td>' + resaltarTexto(d.canton || '-', qRaw) + '<br><span style="color:var(--text-muted)">' +
+        resaltarTexto(d.ciudad || '', qRaw) + '</span></td>' +
+        '<td>' + (pills || '<span style="color:var(--text-muted)">—</span>') + '</td>' +
+        '<td>' + d.estudiantes + '</td>' +
+        '<td>' + (d.docentes || 0) + '</td></tr>';
+    }).join('');
+    listaEl.innerHTML =
+      '<table><thead><tr><th>Colegio</th><th>Ubicación</th><th>Plataformas y periodos</th>' +
+      '<th>Estudiantes</th><th>Docentes</th></tr></thead><tbody>' + filas + '</tbody></table>';
+
+    var desde = inicio + 1, hasta = Math.min(inicio + colFiltro.limite, filtrados.length);
+    paginacionEl.innerHTML =
+      '<span>' + desde + '–' + hasta + ' de ' + filtrados.length + '</span>' +
+      '<button type="button" id="col-prev"' + (colFiltro.pagina <= 1 ? ' disabled' : '') + '>← Anterior</button>' +
+      '<span>Pág. ' + colFiltro.pagina + ' / ' + paginas + '</span>' +
+      '<button type="button" id="col-next"' + (colFiltro.pagina >= paginas ? ' disabled' : '') + '>Siguiente →</button>';
+    var prev = $('col-prev'), next = $('col-next');
+    if (prev) prev.addEventListener('click', function () { if (colFiltro.pagina > 1) { colFiltro.pagina--; renderColegios(); } });
+    if (next) next.addEventListener('click', function () { if (colFiltro.pagina < paginas) { colFiltro.pagina++; renderColegios(); } });
+  }
+
+  function cargarColegios() {
+    btnRefrescar.classList.add('spinning'); btnRefrescar.disabled = true;
+    if (colegios.length === 0) listaEl.innerHTML = '<p class="empty-state">Cargando…</p>';
+    return api('?listar=1').then(function (r) {
+      if (!r.ok) { listaEl.innerHTML = '<p class="empty-state">No se pudo cargar el listado.</p>'; paginacionEl.innerHTML = ''; return; }
+      colegios = Array.isArray(r.datos) ? r.datos : [];
+      renderColegios();
     }).catch(function () {
-      listaEl.innerHTML = '<p class="empty-state">No se pudo cargar el listado.</p>';
+      listaEl.innerHTML = '<p class="empty-state">No se pudo cargar el listado.</p>'; paginacionEl.innerHTML = '';
+    }).finally(function () {
+      // El giro se ve como acción aunque la respuesta sea instantánea.
+      setTimeout(function () { btnRefrescar.classList.remove('spinning'); btnRefrescar.disabled = false; }, 350);
     });
   }
-  $('btn-refrescar').addEventListener('click', cargarColegios);
+
+  btnRefrescar.addEventListener('click', cargarColegios);
+  var debounceCol;
+  $('col-q').addEventListener('input', function (e) {
+    clearTimeout(debounceCol);
+    var v = e.target.value;
+    debounceCol = setTimeout(function () { colFiltro.q = v; colFiltro.pagina = 1; renderColegios(); }, 250);
+  });
+  $('col-limite').addEventListener('change', function (e) {
+    colFiltro.limite = Number(e.target.value) || 10; colFiltro.pagina = 1; renderColegios();
+  });
 
   // ── Arranque: reusa la sesión si sigue viva ─────────────────────────────
   (function init() {

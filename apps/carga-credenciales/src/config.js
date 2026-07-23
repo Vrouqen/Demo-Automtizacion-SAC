@@ -17,8 +17,14 @@ export const config = {
     usuario: process.env.APP_USUARIO || 'sac_app',
     clave: process.env.APP_CLAVE,
   },
-  // Solo se aceptan cargas de credenciales de estas plataformas.
-  plataformasPermitidas: ['compartir', 'creo'],
+  // Plataformas cuya carga está ACTIVA. Sumun usa el mismo formato de archivo que
+  // Compartir/CREO. RLP y RS están implementadas (parser en inglés, pestañas
+  // Teachers/Students) pero DESACTIVADAS a propósito: la UI deshabilita sus
+  // botones y el backend rechaza sus cargas hasta que se pasen a producción.
+  plataformasPermitidas: ['compartir', 'creo', 'sumun'],
+  // Reconocidas por el parser pero no habilitadas todavía (para el mensaje de
+  // error y para documentar que existen).
+  plataformasEnEspera: ['rlp', 'rs'],
 };
 
 export function validarConfig() {

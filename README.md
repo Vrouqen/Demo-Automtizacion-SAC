@@ -204,9 +204,9 @@ responde a ese aviso, `buscarEscalamientoPendiente` lo reconoce por ese `convers
 `resolverEscalamiento` reenvía la respuesta al hilo del cliente — **sin exponerle códigos internos**.
 
 Los registros de ticket llevan `tipo: 'ticket'` para no contaminar las métricas de casos ni el
-reparto entre agentes (esos son solo de casos). Al cliente, un ticket le genera un acuse breve al
-crearse ("recibimos tu solicitud…", sin el código `PENDIENTE-XXX`) y luego la respuesta real del
-equipo por el viaje de vuelta.
+reparto entre agentes (esos son solo de casos). Al crear un ticket, el cliente **no recibe acuse**:
+solo el equipo recibe el aviso, y el cliente recibe únicamente la respuesta final por el viaje de
+vuelta. (La rama de ticket en n8n no conecta con el nodo Reply; ver `docs/SETUP_N8N.md`.)
 
 ### Firma corporativa
 
@@ -237,6 +237,20 @@ previsto. `services/analitica.js` deriva de ahí:
 
 El dashboard (`?vista=dashboard`) los dibuja con selector de rango y refresco automático. Es una sola
 página autocontenida, sin dependencias externas.
+
+**Conversaciones e incidencias (lista + detalle).** Además de los agregados, el dashboard trae una
+tabla de **cada hilo recibido** (asunto, cliente, categoría, estado, ticket/caso, última actividad)
+con **búsqueda** (asunto/cliente/id), **filtro por estado** y **paginación** (10/25/50/100). Al hacer
+clic en una fila se abre el **hilo completo**: mensajes cliente/asistente, línea de tiempo de
+eventos, y la ficha del ticket/caso con la respuesta de quien lo atendió. La sirven dos endpoints:
+
+- `GET /?reporte=conversaciones&pagina=&limite=&estado=&q=` — lista paginada.
+- `GET /?reporte=conversacion&id=<hiloId>` — detalle de un hilo.
+
+La categoría y el resultado se **derivan** de los eventos/derivaciones al leer, sin cambiar el
+esquema, así que también aplican al histórico ya guardado. **Ojo:** el detalle muestra los mensajes
+tal cual se enviaron —una respuesta de credenciales contiene login y contraseña—, por eso estos
+endpoints van tras `DASHBOARD_TOKEN` igual que la analítica. Configúralo antes de compartir el enlace.
 
 ### Tickets y enlazado (Jira en standby)
 
@@ -294,7 +308,14 @@ Las demás rutas de datos exigen `Authorization: Bearer <token>`.
   totalColegio }` y `hojasIgnoradas`.
 
 **`GET /?listar=1`** — lista los colegios cargados (sin credenciales), con región/ciudad/cantón,
-plataformas y periodos cargados, y cantidad de estudiantes.
+plataformas y periodos cargados, y cantidad de **estudiantes y docentes**.
+
+El listado en la UI trae **buscador** (nombre, código, id, provincia, cantón — sin tildes, con
+coincidencias resaltadas), **paginación** con selector 10/50/100 por página, y un botón de **recarga**
+(icono que gira mientras actualiza). La búsqueda y la paginación operan en el cliente sobre la lista
+ya cargada —que además alimenta el autocompletado del formulario—, así que la tabla solo dibuja una
+página a la vez. Si el número de colegios creciera a miles, el corte natural sería paginar/buscar en
+el servidor y darle al autocompletado un endpoint liviano propio.
 
 > Esta app **solo sube credenciales**: no calcula ni muestra estados. Quién está activo lo deduce el
 > cerebro al consultar (`?reporte=estudiantes_activos`), a partir de si el estudiante tiene

@@ -365,7 +365,7 @@
         320
       ],
       "onError": "continueRegularOutput",
-      "notes": "VIAJE DE VUELTA DEL TICKET: guarda el conversationId del aviso recien enviado al equipo. Cuando el equipo responda a ese aviso, el cerebro lo reconoce por ese id y reenvia la respuesta al hilo original del cliente, igual que con un caso.\n\nSi falla, queda el respaldo del codigo del ticket en el asunto, por eso continua ante error."
+      "notes": "VIAJE DE VUELTA DEL TICKET: guarda el conversationId del aviso recien enviado al equipo. Cuando el equipo responda a ese aviso, el cerebro lo reconoce por ese id y reenvia la respuesta al hilo original del cliente, igual que con un caso.\n\nSi falla, queda el respaldo del codigo del ticket en el asunto, por eso continua ante error.\n\nFIN DE LA RAMA: a proposito NO conecta al Reply. El cliente no recibe acuse al crearse el ticket; solo recibira la respuesta final del equipo cuando este responda al aviso (viaje de vuelta)."
     },
     {
       "parameters": {
@@ -496,13 +496,7 @@
     },
     "HTTP: registrar hilo ticket": {
       "main": [
-        [
-          {
-            "node": "IF: hay mensaje al que responder",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     }
   },

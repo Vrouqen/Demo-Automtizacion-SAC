@@ -83,6 +83,33 @@ export const config = {
   },
 };
 
+// Extrae la dirección "limpia" de "Nombre <correo>" o "correo". En minúsculas.
+// (Duplicado mínimo de utils/correo.extraerEmail para no crear un ciclo de
+// imports config↔correo↔firma.)
+function emailLimpio(valor) {
+  const s = String(valor || '').trim();
+  const m = s.match(/<([^>]+)>/);
+  return (m ? m[1] : s).trim().toLowerCase();
+}
+
+/**
+ * ¿La dirección es INTERNA del sistema (buzón de soporte, agente digital o buzón
+ * de un equipo)? Un correo desde una de ellas nunca es un cliente: es una
+ * respuesta a algo que enviamos nosotros. Sirve para no convertir esas
+ * respuestas en conversaciones de cliente ni cerrarlas/avisarlas por error.
+ */
+export function esCorreoInterno(valor) {
+  const dir = emailLimpio(valor);
+  if (!dir) return false;
+  const internos = [
+    ...config.cuentasSoporte,
+    ...config.agentes.correos.map((c) => c.toLowerCase()),
+    config.equipos.cuentas.toLowerCase(),
+    config.equipos.servicioDigital.toLowerCase(),
+  ].filter(Boolean);
+  return internos.includes(dir);
+}
+
 export function validarConfig() {
   const faltantes = [];
   if (!config.mongo.uri) faltantes.push('MONGODB_URI');

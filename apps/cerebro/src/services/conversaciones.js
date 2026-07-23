@@ -1,5 +1,6 @@
 import { coleccionConversaciones, coleccionDescartes } from '../db/mongo.js';
 import { textoAHtml } from '../utils/correo.js';
+import { esCorreoInterno } from '../config.js';
 import { conFirmaTexto } from '../utils/firma.js';
 
 /**
@@ -95,6 +96,13 @@ export async function cerrarConversacionesInactivas({ horas = 24 } = {}) {
 
   const casos = [];
   for (const conv of pendientes) {
+    // GUARDA: nunca enviar el correo de cierre a una dirección INTERNA (agente
+    // digital, buzón de equipo o soporte). Esas conversaciones son basura: el
+    // hilo de un AVISO que por error quedó registrado como si el agente fuera un
+    // "usuario". Se cierran EN SILENCIO (sin correo) para limpiar el estado y que
+    // no reaparezcan, pero NO se le escribe a nadie.
+    const interno = esCorreoInterno(conv.remitente);
+
     const ultimoUsuario = [...(conv.mensajes || [])]
       .reverse()
       .find((m) => m.rol === 'usuario' && m.mensajeId);
@@ -104,11 +112,17 @@ export async function cerrarConversacionesInactivas({ horas = 24 } = {}) {
       {
         $set: { estado: 'cerrado_inactividad', actualizadoEn: new Date() },
         $push: {
-          mensajes: { rol: 'asistente', cuerpo: texto, fecha: new Date() },
-          eventos: { tipo: 'cerrado_por_inactividad', detalle: { horas }, fecha: new Date() },
+          eventos: {
+            tipo: interno ? 'cerrado_inactividad_interno_sin_aviso' : 'cerrado_por_inactividad',
+            detalle: { horas },
+            fecha: new Date(),
+          },
+          ...(interno ? {} : { mensajes: { rol: 'asistente', cuerpo: texto, fecha: new Date() } }),
         },
       }
     );
+
+    if (interno) continue; // cerrada en silencio: no se avisa a una dirección interna
 
     casos.push({
       hiloId: conv._id,

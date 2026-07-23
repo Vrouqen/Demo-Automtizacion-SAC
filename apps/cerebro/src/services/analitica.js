@@ -262,3 +262,157 @@ export async function obtenerAnalitica({ desde, hasta } = {}) {
 
   return r;
 }
+
+// ---------------------------------------------------------------------------
+// Listado y detalle de conversaciones (para el dashboard: ver qué llegó, en qué
+// estado, y abrir el hilo completo). No cambia el esquema: la "categoría" y el
+// "resultado" se DERIVAN de los eventos y de las derivaciones al leer, así que
+// también aplican a los datos ya guardados.
+// ---------------------------------------------------------------------------
+
+function escaparRegex(s) {
+  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// "Categoría" legible del hilo, deducida del evento más significativo. El orden
+// del arreglo es la prioridad: si un hilo tuvo varios, gana el de más arriba.
+const CATEGORIA_POR_EVENTO = [
+  ['escalado_a_agente', 'Caso derivado a agente'],
+  ['ticket_creado', 'Ticket'],
+  ['credencial_ok', 'Credenciales entregadas'],
+  ['credencial_homonimos', 'Colegios homónimos'],
+  ['credencial_colegio_no_encontrado', 'Colegio no encontrado'],
+  ['credencial_estudiante_no_encontrado', 'Estudiante no encontrado'],
+  ['credencial_candidatos', 'Varias coincidencias'],
+  ['consulta_estudiantes_activos', 'Estudiantes activos'],
+  ['pin_info', 'PIN de acceso'],
+  ['fuera_de_alcance', 'Fuera de alcance'],
+  ['correo_truncado', 'Correo cortado'],
+];
+
+function categoriaDesdeEventos(eventos = []) {
+  const tipos = new Set(eventos.map((e) => e.tipo));
+  for (const [tipo, etiqueta] of CATEGORIA_POR_EVENTO) {
+    if (tipos.has(tipo)) return etiqueta;
+  }
+  return 'Consulta';
+}
+
+/**
+ * Lista paginada de conversaciones (datos superficiales para la tabla). Permite
+ * filtrar por estado y por texto (asunto, remitente o id de hilo), y trae el
+ * resumen de derivaciones (ticket/caso) de cada hilo en UNA sola consulta extra
+ * (sin N+1).
+ */
+export async function listarConversaciones({ estado, q, pagina = 1, limite = 25 } = {}) {
+  const col = await coleccionConversaciones();
+  const colEsc = await coleccionEscalamientos();
+
+  const filtro = {};
+  if (estado) filtro.estado = estado;
+  if (q && String(q).trim()) {
+    const rx = new RegExp(escaparRegex(String(q).trim()), 'i');
+    filtro.$or = [{ asunto: rx }, { remitente: rx }, { _id: rx }];
+  }
+
+  const lim = Math.min(Math.max(Number(limite) || 25, 1), 100);
+  const pag = Math.max(Number(pagina) || 1, 1);
+
+  const total = await col.countDocuments(filtro);
+  const docs = await col
+    .find(filtro, {
+      projection: {
+        asunto: 1, remitente: 1, estado: 1, creadoEn: 1, actualizadoEn: 1,
+        mensajes: 1, eventos: 1, tickets: 1,
+      },
+    })
+    .sort({ actualizadoEn: -1 })
+    .skip((pag - 1) * lim)
+    .limit(lim)
+    .toArray();
+
+  const ids = docs.map((d) => d._id);
+  const derivaciones = ids.length
+    ? await colEsc
+        .find(
+          { hiloId: { $in: ids } },
+          { projection: { hiloId: 1, tipo: 1, estado: 1, agenteEmail: 1, motivo: 1 } }
+        )
+        .toArray()
+    : [];
+  const porHilo = new Map();
+  for (const d of derivaciones) {
+    const arr = porHilo.get(d.hiloId) || [];
+    arr.push(d);
+    porHilo.set(d.hiloId, arr);
+  }
+
+  const filas = docs.map((d) => {
+    const mensajes = d.mensajes || [];
+    const derivs = (porHilo.get(d._id) || []).map((e) => ({
+      codigo: e._id,
+      tipo: e.tipo || 'caso',
+      estado: e.estado,
+      agente: e.agenteEmail || null,
+    }));
+    return {
+      id: d._id,
+      asunto: d.asunto || '(sin asunto)',
+      remitente: d.remitente || '',
+      estado: d.estado || 'abierto',
+      categoria: categoriaDesdeEventos(d.eventos || []),
+      creadoEn: d.creadoEn || null,
+      actualizadoEn: d.actualizadoEn || null,
+      nMensajes: mensajes.length,
+      nTickets: (d.tickets || []).length,
+      derivaciones: derivs,
+    };
+  });
+
+  return { total, pagina: pag, limite: lim, paginas: Math.max(Math.ceil(total / lim), 1), filas };
+}
+
+/**
+ * Detalle COMPLETO de una conversación: el hilo de mensajes, la línea de tiempo
+ * de eventos, los tickets y las derivaciones (caso/ticket) con la respuesta de
+ * quien lo atendió.
+ *
+ * OJO: los mensajes se guardan tal cual se enviaron. Una respuesta de
+ * credenciales contiene login y contraseña en texto — esta vista es interna y
+ * DEBE ir protegida con DASHBOARD_TOKEN.
+ */
+export async function obtenerConversacionDetalle(id) {
+  const col = await coleccionConversaciones();
+  const conv = await col.findOne({ _id: id });
+  if (!conv) return null;
+
+  const colEsc = await coleccionEscalamientos();
+  const derivaciones = await colEsc.find({ hiloId: id }).toArray();
+
+  return {
+    id: conv._id,
+    asunto: conv.asunto || '(sin asunto)',
+    remitente: conv.remitente || '',
+    cuentaSoporte: conv.cuentaSoporte || '',
+    estado: conv.estado || 'abierto',
+    categoria: categoriaDesdeEventos(conv.eventos || []),
+    creadoEn: conv.creadoEn || null,
+    actualizadoEn: conv.actualizadoEn || null,
+    mensajes: (conv.mensajes || []).map((m) => ({ rol: m.rol, cuerpo: m.cuerpo, fecha: m.fecha || null })),
+    eventos: (conv.eventos || []).map((e) => ({ tipo: e.tipo, detalle: e.detalle || null, fecha: e.fecha || null })),
+    tickets: (conv.tickets || []).map((t) => ({
+      jiraKey: t.jiraKey, tipo: t.tipo, equipo: t.equipo, estado: t.estado,
+      descripcion: t.descripcion, enlazadoA: t.enlazadoA || null, creadoEn: t.creadoEn || null,
+    })),
+    derivaciones: derivaciones.map((e) => ({
+      codigo: e._id,
+      tipo: e.tipo || 'caso',
+      estado: e.estado,
+      motivo: e.motivo || e.tipoTicket || null,
+      agente: e.agenteEmail || null,
+      respuestaAgente: e.respuestaAgente || null,
+      respondidoEn: e.respondidoEn || null,
+      creadoEn: e.creadoEn || null,
+    })),
+  };
+}

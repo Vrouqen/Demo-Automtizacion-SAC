@@ -132,6 +132,80 @@
     padding: 6px 10px; font-size: 12px; color: var(--text-primary);
     box-shadow: 0 4px 14px rgba(0,0,0,.14); white-space: nowrap;
   }
+
+  /* ── Conversaciones ── */
+  .filtros-conv { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .filtros-conv input, .filtros-conv select {
+    font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  .filtros-conv input { flex: 1 1 220px; min-width: 160px; }
+  .filtros-conv input:focus, .filtros-conv select:focus { outline: 2px solid var(--series-1); outline-offset: -1px; }
+
+  table.conv { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.conv th, table.conv td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  table.conv th { color: var(--text-muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  table.conv tbody tr { cursor: pointer; }
+  table.conv tbody tr:hover { background: color-mix(in srgb, var(--series-1) 8%, transparent); }
+  .conv-asunto { font-weight: 600; color: var(--text-primary); }
+  .conv-cliente { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .conv-cat { color: var(--text-secondary); }
+
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .badge.abierto        { background: color-mix(in srgb, var(--series-1) 14%, transparent); color: var(--series-1); }
+  .badge.esperando_usuario { background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); }
+  .badge.esperando_agente  { background: color-mix(in srgb, var(--serious) 20%, transparent); color: var(--serious); }
+  .badge.resuelto       { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+  .badge.cerrado, .badge.cerrado_inactividad { background: var(--grid); color: var(--text-muted); }
+  .badge.tic { background: color-mix(in srgb, var(--series-1) 12%, transparent); color: var(--series-1); border-color: color-mix(in srgb, var(--series-1) 40%, transparent); }
+  .badge.cas { background: color-mix(in srgb, var(--ord-3) 16%, transparent); color: var(--ord-3); }
+
+  .paginacion { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 12px; font-size: 13px; color: var(--text-secondary); flex-wrap: wrap; }
+  .paginacion button {
+    font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  .paginacion button:disabled { opacity: .45; cursor: not-allowed; }
+  .paginacion button:hover:not(:disabled) { border-color: var(--series-1); }
+
+  /* ── Modal ── */
+  .modal-fondo {
+    position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.5);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-fondo[hidden] { display: none; }
+  .modal {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+    width: min(760px, 100%); max-height: 88vh; display: flex; flex-direction: column;
+    box-shadow: 0 12px 48px rgba(0,0,0,.35); overflow: hidden;
+  }
+  .modal-cab { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--grid); }
+  .modal-cab h3 { margin: 0; font-size: 15px; }
+  .modal-sub { color: var(--text-muted); font-size: 12px; margin-top: 3px; word-break: break-word; }
+  .modal-x { margin-left: auto; background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+  .modal-x:hover { background: var(--grid); color: var(--text-primary); }
+  .modal-cuerpo { padding: 16px 18px; overflow-y: auto; }
+  .modal-cuerpo h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin: 18px 0 8px; }
+  .modal-cuerpo h4:first-child { margin-top: 0; }
+
+  .msg { border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .msg .quien { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 4px; display: flex; justify-content: space-between; gap: 8px; }
+  .msg .quien .cuando { font-weight: 400; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
+  .msg.usuario   { background: color-mix(in srgb, var(--series-1) 8%, transparent); border: 1px solid color-mix(in srgb, var(--series-1) 22%, transparent); }
+  .msg.usuario .quien { color: var(--series-1); }
+  .msg.asistente { background: var(--page); border: 1px solid var(--grid); }
+  .msg.asistente .quien { color: var(--text-secondary); }
+
+  .evento { display: flex; gap: 10px; font-size: 12.5px; padding: 5px 0; border-bottom: 1px solid var(--grid); }
+  .evento .et { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .evento .ev { color: var(--text-secondary); }
+  .ficha { background: var(--page); border: 1px solid var(--grid); border-radius: 10px; padding: 12px; font-size: 13px; margin-bottom: 8px; }
+  .ficha .kv { display: flex; gap: 8px; padding: 2px 0; }
+  .ficha .kv b { color: var(--text-muted); font-weight: 600; min-width: 92px; }
+  .aviso-pii { font-size: 12px; color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; }
 </style>
 </head>
 <body>
@@ -200,14 +274,53 @@
     </div>
   </div>
 
+  <div class="tarjeta" style="margin-bottom:12px">
+    <h2>Conversaciones e incidencias</h2>
+    <p class="nota">Cada hilo de correo recibido. Haz clic en una fila para ver el hilo completo, los eventos y el ticket/caso.</p>
+    <div class="filtros-conv">
+      <input type="search" id="conv-q" placeholder="Buscar por asunto, cliente o id…" autocomplete="off" />
+      <select id="conv-estado" aria-label="Estado">
+        <option value="">Todos los estados</option>
+        <option value="abierto">Abierto</option>
+        <option value="esperando_usuario">Esperando al usuario</option>
+        <option value="esperando_agente">Esperando al agente</option>
+        <option value="resuelto">Resuelto</option>
+        <option value="cerrado">Cerrado</option>
+        <option value="cerrado_inactividad">Cerrado por inactividad</option>
+      </select>
+      <select id="conv-limite" aria-label="Por página">
+        <option value="10">10 / pág.</option>
+        <option value="25" selected>25 / pág.</option>
+        <option value="50">50 / pág.</option>
+        <option value="100">100 / pág.</option>
+      </select>
+    </div>
+    <div class="desplazable" id="conv-tabla" style="margin-top:12px"></div>
+    <div class="paginacion" id="conv-paginacion"></div>
+  </div>
+
   <details>
-    <summary>Ver los datos en tabla</summary>
+    <summary>Ver los datos agregados en tabla</summary>
     <div class="tarjeta desplazable" style="margin-top:8px">
       <table id="tabla"><tbody></tbody></table>
     </div>
   </details>
 
   <p class="pie-pagina" id="pie"></p>
+</div>
+
+<!-- Modal de detalle de conversación -->
+<div class="modal-fondo" id="modal-fondo" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+    <div class="modal-cab">
+      <div>
+        <h3 id="modal-titulo">Conversación</h3>
+        <div class="modal-sub" id="modal-sub"></div>
+      </div>
+      <button class="modal-x" id="modal-x" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="modal-cuerpo" id="modal-cuerpo"></div>
+  </div>
 </div>
 <div class="tip" id="tip" role="status"></div>
 
@@ -446,7 +559,183 @@
     });
   });
 
+  // ─────────────────────────── Conversaciones ───────────────────────────────
+  const esc = (s) => String(s === null || s === undefined ? '' : s)
+    .replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const tokenQS = () => {
+    const t = new URLSearchParams(location.search).get('token');
+    return t ? '&token=' + encodeURIComponent(t) : '';
+  };
+  const fechaCorta = (f) => (f ? new Date(f).toLocaleString('es-EC', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+  const ESTADO_LBL = {
+    abierto: 'Abierto', esperando_usuario: 'Esperando al usuario', esperando_agente: 'Esperando al agente',
+    resuelto: 'Resuelto', cerrado: 'Cerrado', cerrado_inactividad: 'Cerrado (inactividad)',
+  };
+  function badgeEstado(e) {
+    return '<span class="badge ' + esc(e) + '">' + esc(ESTADO_LBL[e] || e || '—') + '</span>';
+  }
+  function badgeDeriv(d) {
+    const cls = d.tipo === 'ticket' ? 'tic' : 'cas';
+    const et = (d.tipo === 'ticket' ? 'Ticket' : 'Caso') + (d.estado === 'resuelto' ? ' ✓' : ' ⏳');
+    return '<span class="badge ' + cls + '" title="' + esc(d.codigo) + '">' + esc(et) + '</span>';
+  }
+
+  const convEl = document.getElementById('conv-tabla');
+  const pagEl = document.getElementById('conv-paginacion');
+  const conv = { q: '', estado: '', limite: 25, pagina: 1, cargando: false };
+
+  async function cargarConversaciones() {
+    if (conv.cargando) return;
+    conv.cargando = true;
+    convEl.setAttribute('aria-busy', 'true');
+    if (!convEl.querySelector('table')) convEl.innerHTML = '<p class="vacio">Cargando…</p>';
+    try {
+      const qs = 'reporte=conversaciones&pagina=' + conv.pagina + '&limite=' + conv.limite +
+        (conv.estado ? '&estado=' + encodeURIComponent(conv.estado) : '') +
+        (conv.q ? '&q=' + encodeURIComponent(conv.q) : '') + tokenQS();
+      const res = await fetch(location.pathname + '?' + qs, { headers: { accept: 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      pintarConversaciones(await res.json());
+    } catch (err) {
+      convEl.innerHTML = '<p class="vacio">No se pudo cargar (' + esc(err.message) + ').</p>';
+      pagEl.innerHTML = '';
+    } finally {
+      conv.cargando = false;
+      convEl.removeAttribute('aria-busy');
+    }
+  }
+
+  function pintarConversaciones(d) {
+    if (!d.filas.length) {
+      convEl.innerHTML = '<p class="vacio">No hay conversaciones' + (conv.q || conv.estado ? ' con esos filtros' : '') + '.</p>';
+      pagEl.innerHTML = '';
+      return;
+    }
+    const filas = d.filas.map((f) => {
+      const derivs = (f.derivaciones || []).map(badgeDeriv).join(' ') ||
+        (f.nTickets ? '<span class="badge tic">Ticket</span>' : '<span style="color:var(--text-muted)">—</span>');
+      return '<tr data-id="' + esc(f.id) + '">' +
+        '<td><div class="conv-asunto">' + esc(f.asunto) + '</div>' +
+        '<div class="conv-cliente">' + esc(f.remitente) + '</div></td>' +
+        '<td class="conv-cat">' + esc(f.categoria) + '</td>' +
+        '<td>' + badgeEstado(f.estado) + '</td>' +
+        '<td>' + derivs + '</td>' +
+        '<td style="white-space:nowrap;color:var(--text-muted)">' + fechaCorta(f.actualizadoEn) +
+        '<br><span style="font-size:11px">' + f.nMensajes + ' mensajes</span></td></tr>';
+    }).join('');
+    convEl.innerHTML =
+      '<table class="conv"><thead><tr><th>Asunto / Cliente</th><th>Categoría</th><th>Estado</th>' +
+      '<th>Ticket / Caso</th><th>Última actividad</th></tr></thead><tbody>' + filas + '</tbody></table>';
+    convEl.querySelectorAll('tbody tr').forEach((tr) => {
+      tr.addEventListener('click', () => abrirDetalle(tr.dataset.id));
+    });
+
+    const desde = (d.pagina - 1) * d.limite + 1;
+    const hasta = Math.min(d.pagina * d.limite, d.total);
+    pagEl.innerHTML =
+      '<span>' + desde + '–' + hasta + ' de ' + d.total + '</span>' +
+      '<button id="pag-prev"' + (d.pagina <= 1 ? ' disabled' : '') + '>← Anterior</button>' +
+      '<span>Pág. ' + d.pagina + ' / ' + d.paginas + '</span>' +
+      '<button id="pag-next"' + (d.pagina >= d.paginas ? ' disabled' : '') + '>Siguiente →</button>';
+    const prev = document.getElementById('pag-prev'), next = document.getElementById('pag-next');
+    if (prev) prev.addEventListener('click', () => { if (conv.pagina > 1) { conv.pagina--; cargarConversaciones(); } });
+    if (next) next.addEventListener('click', () => { if (conv.pagina < d.paginas) { conv.pagina++; cargarConversaciones(); } });
+  }
+
+  // ── Modal de detalle ──
+  const modalFondo = document.getElementById('modal-fondo');
+  const modalCuerpo = document.getElementById('modal-cuerpo');
+  function cerrarModal() { modalFondo.hidden = true; modalCuerpo.innerHTML = ''; }
+  document.getElementById('modal-x').addEventListener('click', cerrarModal);
+  modalFondo.addEventListener('click', (e) => { if (e.target === modalFondo) cerrarModal(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modalFondo.hidden) cerrarModal(); });
+
+  const NOMBRE_EVENTO = {
+    credencial_ok: 'Credenciales entregadas', ticket_creado: 'Ticket creado', escalado_a_agente: 'Caso derivado a agente',
+    respuesta_agente_entregada: 'Respuesta del agente entregada al cliente', pin_info: 'Tutorial de PIN enviado',
+    fuera_de_alcance: 'Fuera de alcance', correo_truncado: 'Correo llegó cortado',
+    derivacion_bloqueada_falta_info: 'Derivación frenada (faltaban datos)', ticket_bloqueado_falta_info: 'Ticket frenado (faltaban datos)',
+    promesa_sin_accion_corregida: 'Respuesta corregida antes de enviar', cerrado_por_inactividad: 'Cerrado por inactividad',
+    escalamiento_fallido: 'Falló la creación del caso',
+  };
+
+  async function abrirDetalle(id) {
+    modalFondo.hidden = false;
+    modalCuerpo.innerHTML = '<p class="vacio">Cargando hilo…</p>';
+    document.getElementById('modal-titulo').textContent = 'Conversación';
+    document.getElementById('modal-sub').textContent = id;
+    try {
+      const res = await fetch(location.pathname + '?reporte=conversacion&id=' + encodeURIComponent(id) + tokenQS(), { headers: { accept: 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      pintarDetalle(await res.json());
+    } catch (err) {
+      modalCuerpo.innerHTML = '<p class="vacio">No se pudo cargar el detalle (' + esc(err.message) + ').</p>';
+    }
+  }
+
+  function pintarDetalle(d) {
+    document.getElementById('modal-titulo').textContent = d.asunto;
+    document.getElementById('modal-sub').innerHTML =
+      esc(d.remitente) + ' · ' + badgeEstado(d.estado) + ' · ' + esc(d.categoria);
+
+    let html = '<div class="aviso-pii">Esta vista puede contener datos personales y credenciales. Es de uso interno.</div>';
+
+    // Derivaciones (ticket / caso)
+    if (d.derivaciones && d.derivaciones.length) {
+      html += '<h4>Ticket / Caso</h4>';
+      html += d.derivaciones.map((e) => {
+        const filas = [
+          ['Código', e.codigo], ['Tipo', e.tipo === 'ticket' ? 'Ticket' : 'Caso'],
+          ['Estado', e.estado], ['Motivo', e.motivo], ['Atiende', e.agente],
+          ['Respondido', e.respondidoEn ? fechaCorta(e.respondidoEn) : '—'],
+        ].filter((kv) => kv[1]);
+        let f = '<div class="ficha">' + filas.map((kv) => '<div class="kv"><b>' + esc(kv[0]) + '</b><span>' + esc(kv[1]) + '</span></div>').join('');
+        if (e.respuestaAgente) f += '<div class="kv"><b>Respuesta</b><span>' + esc(e.respuestaAgente) + '</span></div>';
+        return f + '</div>';
+      }).join('');
+    }
+
+    // Tickets embebidos (info de la orden de trabajo)
+    if (d.tickets && d.tickets.length) {
+      html += '<h4>Detalle del ticket</h4>';
+      html += d.tickets.map((t) =>
+        '<div class="ficha"><div class="kv"><b>' + esc(t.jiraKey) + '</b><span>' + esc(t.tipo) + ' · equipo ' + esc(t.equipo) + '</span></div>' +
+        (t.descripcion ? '<div style="margin-top:6px;white-space:pre-wrap">' + esc(t.descripcion) + '</div>' : '') + '</div>'
+      ).join('');
+    }
+
+    // Hilo de mensajes
+    html += '<h4>Hilo de correo (' + d.mensajes.length + ')</h4>';
+    html += d.mensajes.length ? d.mensajes.map((m) =>
+      '<div class="msg ' + (m.rol === 'usuario' ? 'usuario' : 'asistente') + '">' +
+      '<div class="quien"><span>' + (m.rol === 'usuario' ? 'Cliente' : 'Asistente') + '</span>' +
+      '<span class="cuando">' + fechaCorta(m.fecha) + '</span></div>' + esc(m.cuerpo) + '</div>'
+    ).join('') : '<p class="vacio">Sin mensajes registrados.</p>';
+
+    // Línea de tiempo de eventos
+    if (d.eventos && d.eventos.length) {
+      html += '<h4>Eventos</h4>';
+      html += d.eventos.map((e) =>
+        '<div class="evento"><span class="et">' + fechaCorta(e.fecha) + '</span>' +
+        '<span class="ev">' + esc(NOMBRE_EVENTO[e.tipo] || e.tipo) + '</span></div>'
+      ).join('');
+    }
+
+    modalCuerpo.innerHTML = html;
+    modalCuerpo.scrollTop = 0;
+  }
+
+  // Filtros (búsqueda con retardo, estado y tamaño de página)
+  let debounce;
+  document.getElementById('conv-q').addEventListener('input', (e) => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => { conv.q = e.target.value.trim(); conv.pagina = 1; cargarConversaciones(); }, 300);
+  });
+  document.getElementById('conv-estado').addEventListener('change', (e) => { conv.estado = e.target.value; conv.pagina = 1; cargarConversaciones(); });
+  document.getElementById('conv-limite').addEventListener('change', (e) => { conv.limite = Number(e.target.value); conv.pagina = 1; cargarConversaciones(); });
+
   cargar();
+  cargarConversaciones();
   setInterval(cargar, 30000);
 })();
 </script>

@@ -171,23 +171,22 @@ export async function buscarEstudiante({ nombreCompleto, nivel, paralelo, colegi
     };
   }
 
-  const candidatos = puntuados
-    .filter((p) => p.score >= UMBRAL_ESTUDIANTE_CANDIDATO)
-    .slice(0, 5)
-    .map((p) => ({
-      nombreCompleto: p.est.nombreCompleto,
-      grado: p.est.grado,
-      grupo: p.est.grupo,
-      score: Number(p.score.toFixed(2)),
-    }));
+  const candidatos = puntuados.filter((p) => p.score >= UMBRAL_ESTUDIANTE_CANDIDATO).slice(0, 5);
 
   if (candidatos.length > 0) {
+    // SEGURIDAD: NO se devuelven los nombres, grados ni ningún dato de los
+    // posibles coincidentes. Serían datos de OTROS estudiantes, que quien
+    // escribe no tiene por qué conocer — listarlos es una fuga de datos
+    // personales. Solo se informa que hubo coincidencias parciales para que el
+    // asistente pida al usuario que precise los datos del SUYO.
     return {
       status: 'CANDIDATOS',
       colegio: docColegio.nombre,
-      candidatos,
+      cantidad: candidatos.length,
       detalle:
-        'Hay coincidencias parciales. Confirma con el usuario el nombre completo, nivel o paralelo y vuelve a buscar.',
+        'Hay más de una coincidencia parcial. NO reveles ni enumeres nombres de estudiantes: ' +
+        'pide al usuario el nombre COMPLETO tal cual está matriculado, el nivel/grado y el paralelo, ' +
+        'y vuelve a buscar con esos datos.',
     };
   }
 

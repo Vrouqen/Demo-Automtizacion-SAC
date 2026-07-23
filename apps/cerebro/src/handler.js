@@ -1,7 +1,7 @@
-import { config, validarConfig } from './config.js';
+import { config, validarConfig, esCorreoInterno } from './config.js';
 import { extraerEmail } from './utils/correo.js';
 import { procesarCorreo } from './llm/agente.js';
-import { obtenerAnalitica } from './services/analitica.js';
+import { obtenerAnalitica, listarConversaciones, obtenerConversacionDetalle } from './services/analitica.js';
 import { paginaDashboard } from './dashboard.js';
 import { bytesLogo } from './utils/firma.js';
 import {
@@ -96,10 +96,10 @@ export const handler = async (event) => {
 
     validarConfig();
 
-    // La analítica y el dashboard son de consulta interna. Si hay token
-    // configurado, se exige en ambos (la página lo propaga al pedir los datos
-    // porque va en su propia URL).
-    const esConsultaInterna = query.vista === 'dashboard' || query.reporte === 'analitica';
+    // El dashboard y sus reportes son de consulta interna. Si hay token
+    // configurado, se exige en todos (la página lo propaga al pedir los datos).
+    const REPORTES_INTERNOS = ['analitica', 'conversaciones', 'conversacion'];
+    const esConsultaInterna = query.vista === 'dashboard' || REPORTES_INTERNOS.includes(query.reporte);
     if (esConsultaInterna && config.dashboard.token && query.token !== config.dashboard.token) {
       return respuestaJson(401, { error: 'No autorizado' });
     }
@@ -117,6 +117,24 @@ export const handler = async (event) => {
     if (metodo === 'GET' && query.reporte === 'analitica') {
       const resumen = await obtenerAnalitica({ desde: query.desde, hasta: query.hasta });
       return respuestaJson(200, resumen);
+    }
+
+    // Listado paginado de conversaciones (tabla del dashboard).
+    if (metodo === 'GET' && query.reporte === 'conversaciones') {
+      const lista = await listarConversaciones({
+        estado: query.estado,
+        q: query.q,
+        pagina: query.pagina,
+        limite: query.limite,
+      });
+      return respuestaJson(200, lista);
+    }
+
+    // Detalle de una conversación (hilo completo, al hacer clic en una fila).
+    if (metodo === 'GET' && query.reporte === 'conversacion') {
+      if (!query.id) return respuestaJson(400, { error: 'Falta el parámetro id' });
+      const detalle = await obtenerConversacionDetalle(query.id);
+      return detalle ? respuestaJson(200, detalle) : respuestaJson(404, { error: 'Conversación no encontrada' });
     }
 
     if (metodo === 'GET' && query.reporte === 'estudiantes_activos') {
@@ -217,6 +235,20 @@ export const handler = async (event) => {
         mensajeIdRespuesta: resultado.mensajeId || null,
         textoRespuesta: resultado.textoRespuesta,
         textoRespuestaHtml: resultado.textoRespuestaHtml,
+      });
+    }
+
+    // Llegados aquí no hay ninguna derivación pendiente para este correo. Si el
+    // remitente es INTERNO (un agente digital o un buzón de equipo), es la
+    // respuesta a un aviso YA resuelto (o una segunda respuesta del agente): NO
+    // debe convertirse en una conversación de cliente. Si lo hiciéramos, el hilo
+    // del aviso quedaría como "esperando_usuario" y el cierre automático a 24h
+    // terminaría escribiéndole al agente el correo de "cerramos tu caso".
+    if (esCorreoInterno(body.remitente)) {
+      return respuestaJson(200, {
+        hiloId: body.hiloId,
+        accion: 'ninguna',
+        motivo: 'remitente_interno_sin_derivacion_pendiente',
       });
     }
 

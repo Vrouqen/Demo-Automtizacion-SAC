@@ -72,15 +72,21 @@ versiones de n8n.
  [Send delegación]  [Avisar ticket      [mover a Correo                         │
         │            al equipo]          no deseado]                            │
  [registrar hilo    [registrar hilo                                            │
-  de delegación]     ticket]                                                    │
-        │                  │                          [IF: hay mensaje al que responder]
-        └──────────────────┴──────────────────────────────► [Outlook: Reply] ◄─┘
+  de delegación]     ticket]  ← FIN                                             │
+        │            (no responde                     [IF: hay mensaje al que responder]
+        │             al cliente)                                               │
+        └──────────────────────────────────────────────────► [Outlook: Reply] ◄┘
 ```
 
-Las ramas **escalar** (caso) y **crear_ticket** son gemelas: ambas avisan a una persona, registran el
-`conversationId` de ese aviso, y responden al cliente. Ese registro es lo que hace el **viaje de
-vuelta**: cuando la persona responde a su aviso, el cerebro reenvía su respuesta al hilo original del
-cliente.
+**escalar** (caso) y **crear_ticket** avisan a una persona y registran el `conversationId` de ese
+aviso — ese registro es lo que hace el **viaje de vuelta**: cuando la persona responde a su aviso, el
+cerebro reenvía su respuesta al hilo original del cliente.
+
+La diferencia está en el **acuse inmediato al cliente**:
+- **escalar** sí responde al cliente al derivar ("tu caso será atendido por un agente digital").
+- **crear_ticket** NO responde al cliente al crear el ticket: la rama termina en *registrar hilo
+  ticket*. El cliente solo recibe la respuesta final del equipo (por el viaje de vuelta). Por eso esa
+  rama no conecta con el nodo Reply.
 
 **Todos** los correos del buzón entran por el mismo trigger: consultas de clientes y respuestas de
 agentes. El cerebro distingue unas de otras y devuelve en `mensajeIdRespuesta` a qué correo hay que
@@ -172,10 +178,11 @@ Confundirlos hace perder mucho tiempo depurando:
 Si ves `"escalamiento": null` y `"accion": "responder_y_crear_ticket"`, **no hay ningún caso que
 derivar**: es un ticket, y quien debe recibirlo es el equipo, no un agente digital.
 
-> **Un ticket genera dos correos, y eso es correcto:** al **cliente** un acuse breve en su hilo
-> ("Recibimos tu solicitud, te responderemos por este mismo correo" — **sin** el código interno), y
-> al **equipo** (nodo *Avisar ticket al equipo*) el aviso con todos los datos. No es un duplicado:
-> uno es el acuse al cliente, el otro la orden de trabajo.
+> **Al crear un ticket, el cliente NO recibe nada:** solo el **equipo** recibe el aviso con los datos
+> (nodo *Avisar ticket al equipo*). El cliente recibirá únicamente la respuesta final del equipo,
+> cuando este responda al aviso (viaje de vuelta). La rama de ticket por eso no conecta con el Reply.
+> *(El caso —`escalar`— sí manda un acuse al cliente al derivar; si quieres el mismo silencio ahí, se
+> quita igual, desconectando su `registrar hilo` del Reply.)*
 >
 > **El ticket ahora hace VIAJE DE VUELTA, igual que un caso.** Cuando el equipo (o el agente)
 > responde al aviso, el cerebro reconoce esa respuesta por el `conversationId` del aviso —registrado

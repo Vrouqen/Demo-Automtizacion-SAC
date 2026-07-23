@@ -98,23 +98,30 @@ export const handler = async (event) => {
             projection: {
               nombre: 1, codigo: 1, region: 1, ciudad: 1, canton: 1,
               'estudiantes.plataforma': 1, 'estudiantes.periodo': 1,
+              'docentes.plataforma': 1, 'docentes.periodo': 1,
             },
           }
         )
         .toArray();
       return respuestaJson(
         200,
-        docs.map((d) => ({
-          id: d._id,
-          codigo: d.codigo,
-          nombre: d.nombre,
-          region: d.region,
-          ciudad: d.ciudad,
-          canton: d.canton,
-          plataformas: [...new Set((d.estudiantes || []).map((r) => r.plataforma).filter(Boolean))],
-          periodos: [...new Set((d.estudiantes || []).map((r) => r.periodo).filter(Boolean))].sort(),
-          estudiantes: (d.estudiantes || []).length,
-        }))
+        docs.map((d) => {
+          const est = d.estudiantes || [];
+          const doc = d.docentes || [];
+          const todos = [...est, ...doc];
+          return {
+            id: d._id,
+            codigo: d.codigo,
+            nombre: d.nombre,
+            region: d.region,
+            ciudad: d.ciudad,
+            canton: d.canton,
+            plataformas: [...new Set(todos.map((r) => r.plataforma).filter(Boolean))],
+            periodos: [...new Set(todos.map((r) => r.periodo).filter(Boolean))].sort(),
+            estudiantes: est.length,
+            docentes: doc.length,
+          };
+        })
       );
     }
 
@@ -124,10 +131,15 @@ export const handler = async (event) => {
     const raw = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
     const body = JSON.parse(raw);
 
-    const { idColegio, codigoColegio, nombreColegio, region, canton, archivoBase64, nombreArchivo } = body;
+    const { codigoColegio, nombreColegio, region, canton, archivoBase64, nombreArchivo } = body;
     const ciudad = body.ciudad || body.provincia; // "Ciudad (Provincia)": se aceptan ambos nombres
 
-    const faltantes = ['idColegio', 'codigoColegio', 'nombreColegio', 'plataforma', 'periodo', 'archivoBase64'].filter(
+    // El id de Pegasus es OPCIONAL: no todos los colegios lo tienen a la mano al
+    // cargar. Si no viene, la identidad del documento es su código (que sí es
+    // obligatorio y único). Así el _id nunca queda vacío.
+    const idColegio = String(body.idColegio || '').trim() || String(codigoColegio || '').trim();
+
+    const faltantes = ['codigoColegio', 'nombreColegio', 'plataforma', 'periodo', 'archivoBase64'].filter(
       (campo) => !body[campo]
     );
     if (faltantes.length > 0) {
@@ -136,8 +148,11 @@ export const handler = async (event) => {
 
     const plataforma = normalizar(body.plataforma);
     if (!config.plataformasPermitidas.includes(plataforma)) {
+      const enEspera = config.plataformasEnEspera.includes(plataforma);
       return respuestaJson(400, {
-        error: `Plataforma "${body.plataforma}" no permitida. Solo se cargan credenciales de: ${config.plataformasPermitidas.join(', ')}`,
+        error: enEspera
+          ? `La plataforma "${body.plataforma}" está implementada pero aún no habilitada para producción.`
+          : `Plataforma "${body.plataforma}" no permitida. Solo se cargan credenciales de: ${config.plataformasPermitidas.join(', ')}`,
       });
     }
 
@@ -218,6 +233,11 @@ export const handler = async (event) => {
     const fusEstudiantes = fusionar(deEstaCarga(existente?.estudiantes), datos.estudiantes);
     const estudiantes = [...intactos(existente?.estudiantes), ...fusEstudiantes.registros];
 
+    // Los docentes se fusionan igual que los estudiantes (misma plataforma+
+    // periodo, sin borrar a quien no venga en el archivo).
+    const fusDocentes = fusionar(deEstaCarga(existente?.docentes), datos.docentes);
+    const docentes = [...intactos(existente?.docentes), ...fusDocentes.registros];
+
     const resultado = await col.updateOne(
       { _id: idColegio },
       {
@@ -235,6 +255,7 @@ export const handler = async (event) => {
           canton: canton || 'n/a',
           cantonNormalizado: normalizar(canton || 'n/a'),
           estudiantes,
+          docentes,
           hojasProcesadas: datos.hojasProcesadas,
           actualizadoEn: new Date(),
         },
@@ -251,9 +272,9 @@ export const handler = async (event) => {
       canton: canton || 'n/a',
       plataforma,
       periodo,
+      // Cada hoja procesada con el rol (estudiantes/docentes) que se le asignó.
       hojasProcesadas: datos.hojasProcesadas,
-      // Pestañas que se ignoraron (típicamente "Docentes"): se informan para que
-      // el usuario vea que quedaron fuera a propósito.
+      // Hojas que se ignoraron por no tener credenciales parseables.
       hojasIgnoradas: datos.hojasIgnoradas,
       // "actualizados" = ya existían y su contraseña cambió respecto a lo
       // guardado; "sinCambios" = venían en el Excel idénticos a lo que ya había.
@@ -261,6 +282,11 @@ export const handler = async (event) => {
         ...fusEstudiantes.resumen,
         totalPeriodo: fusEstudiantes.registros.length,
         totalColegio: estudiantes.length,
+      },
+      docentes: {
+        ...fusDocentes.resumen,
+        totalPeriodo: fusDocentes.registros.length,
+        totalColegio: docentes.length,
       },
       creado: resultado.upsertedId !== null,
     });
