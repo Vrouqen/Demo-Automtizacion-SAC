@@ -156,6 +156,7 @@
     border: 1px solid transparent; white-space: nowrap;
   }
   .badge.abierto        { background: color-mix(in srgb, var(--series-1) 14%, transparent); color: var(--series-1); }
+  .badge.esperando_consentimiento { background: color-mix(in srgb, var(--ord-3) 16%, transparent); color: var(--ord-3); }
   .badge.esperando_usuario { background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); }
   .badge.esperando_agente  { background: color-mix(in srgb, var(--serious) 20%, transparent); color: var(--serious); }
   .badge.resuelto       { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
@@ -282,6 +283,7 @@
       <select id="conv-estado" aria-label="Estado">
         <option value="">Todos los estados</option>
         <option value="abierto">Abierto</option>
+        <option value="esperando_consentimiento">Esperando consentimiento</option>
         <option value="esperando_usuario">Esperando al usuario</option>
         <option value="esperando_agente">Esperando al agente</option>
         <option value="resuelto">Resuelto</option>
@@ -568,16 +570,22 @@
   };
   const fechaCorta = (f) => (f ? new Date(f).toLocaleString('es-EC', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
   const ESTADO_LBL = {
-    abierto: 'Abierto', esperando_usuario: 'Esperando al usuario', esperando_agente: 'Esperando al agente',
+    abierto: 'Abierto', esperando_consentimiento: 'Esperando consentimiento',
+    esperando_usuario: 'Esperando al usuario', esperando_agente: 'Esperando al agente',
     resuelto: 'Resuelto', cerrado: 'Cerrado', cerrado_inactividad: 'Cerrado (inactividad)',
   };
   function badgeEstado(e) {
     return '<span class="badge ' + esc(e) + '">' + esc(ESTADO_LBL[e] || e || '—') + '</span>';
   }
   function badgeDeriv(d) {
-    const cls = d.tipo === 'ticket' ? 'tic' : 'cas';
-    const et = (d.tipo === 'ticket' ? 'Ticket' : 'Caso') + (d.estado === 'resuelto' ? ' ✓' : ' ⏳');
-    return '<span class="badge ' + cls + '" title="' + esc(d.codigo) + '">' + esc(et) + '</span>';
+    const resuelto = d.estado === 'resuelto';
+    if (d.tipo === 'ticket') {
+      const et = resuelto ? 'Ticket resuelto ✓' : 'Ticket en curso ⏳';
+      return '<span class="badge tic" title="' + esc(d.codigo) + '">' + esc(et) + '</span>';
+    }
+    // Caso escalado a un agente digital.
+    const et = resuelto ? 'Escalado finalizado ✓' : 'Escalado en curso ⏳';
+    return '<span class="badge cas" title="' + esc(d.codigo) + '">' + esc(et) + '</span>';
   }
 
   const convEl = document.getElementById('conv-tabla');
@@ -657,6 +665,8 @@
     derivacion_bloqueada_falta_info: 'Derivación frenada (faltaban datos)', ticket_bloqueado_falta_info: 'Ticket frenado (faltaban datos)',
     promesa_sin_accion_corregida: 'Respuesta corregida antes de enviar', cerrado_por_inactividad: 'Cerrado por inactividad',
     escalamiento_fallido: 'Falló la creación del caso',
+    politica_enviada: 'Política de datos enviada', consentimiento_aceptado: 'Cliente aceptó la política',
+    delegado_por_no_aceptar_politica: 'Delegado a agente (no aceptó la política)',
   };
 
   async function abrirDetalle(id) {
@@ -704,13 +714,19 @@
       ).join('');
     }
 
-    // Hilo de mensajes
+    // Hilo de mensajes. Se muestra el correo real: el del cliente en sus
+    // mensajes, y el del agente digital en el mensaje de vuelta; "Asistente
+    // (automático)" cuando lo redactó el sistema.
     html += '<h4>Hilo de correo (' + d.mensajes.length + ')</h4>';
-    html += d.mensajes.length ? d.mensajes.map((m) =>
-      '<div class="msg ' + (m.rol === 'usuario' ? 'usuario' : 'asistente') + '">' +
-      '<div class="quien"><span>' + (m.rol === 'usuario' ? 'Cliente' : 'Asistente') + '</span>' +
-      '<span class="cuando">' + fechaCorta(m.fecha) + '</span></div>' + esc(m.cuerpo) + '</div>'
-    ).join('') : '<p class="vacio">Sin mensajes registrados.</p>';
+    html += d.mensajes.length ? d.mensajes.map((m) => {
+      const esUsuario = m.rol === 'usuario';
+      const quien = esUsuario
+        ? (m.de || 'Cliente')
+        : (m.de ? 'Agente digital · ' + m.de : 'Asistente (automático)');
+      return '<div class="msg ' + (esUsuario ? 'usuario' : 'asistente') + '">' +
+        '<div class="quien"><span>' + esc(quien) + '</span>' +
+        '<span class="cuando">' + fechaCorta(m.fecha) + '</span></div>' + esc(m.cuerpo) + '</div>';
+    }).join('') : '<p class="vacio">Sin mensajes registrados.</p>';
 
     // Línea de tiempo de eventos
     if (d.eventos && d.eventos.length) {

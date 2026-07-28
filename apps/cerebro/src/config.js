@@ -8,6 +8,7 @@ export const config = {
     coleccionConversaciones: process.env.MONGODB_COLLECTION_CONVERSACIONES || 'conversaciones',
     coleccionEscalamientos: process.env.MONGODB_COLLECTION_ESCALAMIENTOS || 'escalamientos',
     coleccionDescartes: process.env.MONGODB_COLLECTION_DESCARTES || 'descartes',
+    coleccionConsentimientos: process.env.MONGODB_COLLECTION_CONSENTIMIENTOS || 'consentimientos',
   },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
@@ -73,6 +74,20 @@ export const config = {
   equipos: {
     cuentas: (process.env.CORREO_EQUIPO_CUENTAS || '').trim(),
     servicioDigital: (process.env.CORREO_EQUIPO_SERVICIO_DIGITAL || '').trim(),
+  },
+  // Consentimiento de tratamiento de datos. Antes de atender una solicitud, el
+  // cliente debe aceptar la política respondiendo ACEPTO. La aceptación se
+  // guarda por correo (una sola vez, no en cada solicitud).
+  consentimiento: {
+    habilitado: process.env.CONSENTIMIENTO_HABILITADO !== 'false', // activo por defecto
+    // Alcance de la aceptación:
+    //   'correo'  (por defecto) → se pide en CADA solicitud (cada hilo de correo).
+    //   'cliente'            → se pide una vez por correo del cliente y dura `vigenciaDias`.
+    porCorreo: (process.env.CONSENTIMIENTO_ALCANCE || 'correo') !== 'cliente',
+    // Horas sin aceptar antes de delegar la solicitud a un agente humano.
+    horasLimite: Number(process.env.CONSENTIMIENTO_HORAS || 48),
+    // Solo aplica al alcance 'cliente': cuánto vale una aceptación (días).
+    vigenciaDias: Number(process.env.CONSENTIMIENTO_VIGENCIA_DIAS || 365),
   },
   jira: {
     habilitado: process.env.JIRA_HABILITADO === 'true',

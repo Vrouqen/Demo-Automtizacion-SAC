@@ -96,6 +96,33 @@ export function limpiarCuerpoCorreo(cuerpo) {
   return texto;
 }
 
+// Saludo inicial del agente ("Buenas tardes estimad@,", "Hola,", "Estimado:")
+// en la PRIMERA línea. Se quita para no duplicar el "Estimado/a usuario/a:" que
+// pone el envoltorio al reenviar la respuesta al cliente.
+const SALUDO_INICIAL_AGENTE =
+  /^\s*(buen(?:os|as)\s+(?:d[ií]as|tardes|noches)|hola|estimad[oa@]s?|apreciad[oa]s?|cordial(?:es)?\s+saludos?|un\s+cordial\s+saludo|reciba\s+un\s+cordial\s+saludo)\b[^\n]*\n+/i;
+
+// Despedida del agente y todo lo que va DESPUÉS (nombre, cargo, firma personal).
+// Se corta desde la línea de cierre hasta el final. El envoltorio pone luego la
+// despedida y la firma corporativa canónicas.
+const DESPEDIDA_AGENTE_A_FIN =
+  /(?:^|\n)\s*(saludos\s+cordiales|atentamente|cordialmente|un\s+saludo|saludos|quedo\s+atent[oa]|gracias\s+por\s+su\s+atenci[óo]n|qued[oa]mos\s+atent[oa]s?)\b[\s\S]*$/i;
+
+/**
+ * Deja SOLO el contenido útil de la respuesta de un agente digital: quita su
+ * saludo inicial y su despedida/firma personal. Así, al reenviar la respuesta
+ * al cliente, no se acumulan dos saludos ni dos firmas (la del agente y la
+ * corporativa que agrega el envoltorio).
+ *
+ * Se aplica DESPUÉS de limpiarCuerpoCorreo (que ya cortó el hilo citado).
+ */
+export function limpiarRespuestaAgente(texto) {
+  let t = String(texto || '').replace(/\r/g, '').trim();
+  t = t.replace(SALUDO_INICIAL_AGENTE, '');
+  t = t.replace(DESPEDIDA_AGENTE_A_FIN, '');
+  return t.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function escaparHtml(texto) {
   return String(texto || '')
     .replace(/&/g, '&amp;')

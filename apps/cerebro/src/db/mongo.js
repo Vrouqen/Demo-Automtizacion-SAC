@@ -47,3 +47,12 @@ export async function coleccionDescartes() {
   const client = await obtenerClient();
   return client.db(config.mongo.db).collection(config.mongo.coleccionDescartes);
 }
+
+/**
+ * Aceptaciones de la política de tratamiento de datos, una por correo de
+ * cliente. Evita volver a pedir la aceptación en cada solicitud.
+ */
+export async function coleccionConsentimientos() {
+  const client = await obtenerClient();
+  return client.db(config.mongo.db).collection(config.mongo.coleccionConsentimientos);
+}

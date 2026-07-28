@@ -24,6 +24,13 @@ const DOMINIO_MASIVO =
 const ASUNTO_REBOTE =
   /(^|\b)(undeliverable|undelivered mail|delivery (status notification|has failed|failure)|mail delivery (failed|subsystem)|returned mail|no se pudo entregar|correo no entregado|error de entrega|devoluci[óo]n de correo)\b/i;
 
+// Cuerpo de un rebote/NDR. A veces el ASUNTO es el del correo original (p. ej.
+// "RE: Arrive at your goals…") y la señal de rebote solo aparece en el cuerpo:
+// "Delivery has failed to these recipients", "mailbox is full", etc. Se revisa
+// el inicio del cuerpo para atraparlos igual.
+const CUERPO_REBOTE =
+  /\b(delivery has failed to these recipients|your message (?:wasn'?t|couldn'?t be|was not) delivered|the recipient'?s? mailbox is full|mailbox is full and can'?t accept|recipient'?s? mailbox is unavailable|550 5\.\d\.\d|diagnostic[- ]code|delivery status notification \(failure\)|no se pudo entregar (?:el|tu|su) (?:correo|mensaje)|el buz[óo]n del destinatario est[áa] lleno)\b/i;
+
 /** Asuntos / cuerpos de respuesta automática de ausencia. */
 const RESPUESTA_AUTOMATICA =
   /(^|\b)(automatic reply|auto[-\s]?reply|out of office|respuesta autom[áa]tica|fuera de la oficina|estar[ée] fuera de la oficina|ausencia temporal|vacation reply)\b/i;
@@ -72,6 +79,9 @@ export function clasificarCorreoBasura({ remitente, asunto, cuerpo }) {
   // --- Señales fuertes: descartan por sí solas ---
   if (ASUNTO_REBOTE.test(asuntoTxt)) {
     return { categoria: 'rebote', senal: 'asunto de entrega fallida' };
+  }
+  if (CUERPO_REBOTE.test(cuerpoTxt.slice(0, 1200))) {
+    return { categoria: 'rebote', senal: 'cuerpo de notificación de entrega fallida' };
   }
   if (RESPUESTA_AUTOMATICA.test(asuntoTxt) || RESPUESTA_AUTOMATICA.test(cuerpoTxt.slice(0, 400))) {
     return { categoria: 'respuesta_automatica', senal: 'aviso de ausencia / auto-reply' };

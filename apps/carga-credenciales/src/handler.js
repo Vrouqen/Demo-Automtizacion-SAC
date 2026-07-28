@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { config, validarConfig } from './config.js';
-import { parsearExcelCredenciales } from './excel/parseExcel.js';
+import { parsearExcelCredenciales, registroIndividual } from './excel/parseExcel.js';
 import { coleccionColegios } from './db/mongo.js';
 import { normalizar } from './utils/similitud.js';
 import { cifrar, descifrar } from './utils/cifrado.js';
@@ -139,9 +139,13 @@ export const handler = async (event) => {
     // obligatorio y único). Así el _id nunca queda vacío.
     const idColegio = String(body.idColegio || '').trim() || String(codigoColegio || '').trim();
 
-    const faltantes = ['codigoColegio', 'nombreColegio', 'plataforma', 'periodo', 'archivoBase64'].filter(
-      (campo) => !body[campo]
-    );
+    // Dos formas de cargar: un Excel completo, o UN usuario suelto desde el
+    // formulario individual. El resto del flujo es idéntico para ambas.
+    const esIndividual = Boolean(body.individual);
+
+    const requeridos = ['codigoColegio', 'nombreColegio', 'plataforma', 'periodo'];
+    if (!esIndividual) requeridos.push('archivoBase64');
+    const faltantes = requeridos.filter((campo) => !body[campo]);
     if (faltantes.length > 0) {
       return respuestaJson(400, { error: `Faltan campos obligatorios: ${faltantes.join(', ')}` });
     }
@@ -161,12 +165,17 @@ export const handler = async (event) => {
       return respuestaJson(400, { error: `Periodo "${body.periodo}" inválido. Formato esperado: 2026-2027` });
     }
 
-    if (nombreArchivo && !/\.(xlsx|xlsm|xltx|xltm)$/i.test(nombreArchivo)) {
-      return respuestaJson(400, { error: 'El archivo debe ser Excel (.xlsx)' });
+    let datos;
+    if (esIndividual) {
+      // Lanza un error 400 con el detalle si faltan login/contraseña/nombre.
+      datos = registroIndividual(body.individual);
+    } else {
+      if (nombreArchivo && !/\.(xlsx|xlsm|xltx|xltm)$/i.test(nombreArchivo)) {
+        return respuestaJson(400, { error: 'El archivo debe ser Excel (.xlsx)' });
+      }
+      const buffer = Buffer.from(archivoBase64, 'base64');
+      datos = parsearExcelCredenciales(buffer);
     }
-
-    const buffer = Buffer.from(archivoBase64, 'base64');
-    const datos = parsearExcelCredenciales(buffer);
 
     // Marca plataforma + periodo y cifra las credenciales antes de tocar la
     // base. Esta app solo sube credenciales: no calcula ni guarda estados —

@@ -16,7 +16,8 @@ import {
   buscarEscalamientoPendiente,
   registrarHiloDelegacion,
 } from './services/escalamientos.js';
-import { limpiarCuerpoCorreo } from './utils/correo.js';
+import { limpiarCuerpoCorreo, limpiarRespuestaAgente } from './utils/correo.js';
+import { delegarConsentimientosVencidos } from './services/consentimiento.js';
 
 function respuestaJson(statusCode, cuerpo) {
   return {
@@ -41,12 +42,21 @@ function parsearBody(event) {
 async function entregarRespuestaAgente({ codigo, cuerpo, correoAgente }) {
   const resultado = await resolverEscalamiento({
     codigo,
-    respuestaAgente: limpiarCuerpoCorreo(cuerpo),
+    // limpiarCuerpoCorreo corta el hilo citado; limpiarRespuestaAgente quita el
+    // saludo y la firma personal del agente, para no duplicarlos con la firma
+    // corporativa del envoltorio.
+    respuestaAgente: limpiarRespuestaAgente(limpiarCuerpoCorreo(cuerpo)),
     correoAgente,
   });
 
   if (resultado.status === 'OK') {
-    await registrarMensaje(resultado.hiloId, { rol: 'asistente', cuerpo: resultado.textoRespuesta });
+    // Se guarda quién respondió (el agente digital) para que el dashboard lo
+    // muestre con su correo, en vez de "Asistente".
+    await registrarMensaje(resultado.hiloId, {
+      rol: 'asistente',
+      cuerpo: resultado.textoRespuesta,
+      de: correoAgente || null,
+    });
     await registrarEvento(resultado.hiloId, {
       tipo: 'respuesta_agente_entregada',
       detalle: { codigo, correoAgente: correoAgente || null },
@@ -150,6 +160,15 @@ export const handler = async (event) => {
       const horas = query.horas ? Number(query.horas) : 24;
       const casos = await cerrarConversacionesInactivas({ horas });
       return respuestaJson(200, { cerradas: casos.length, casos });
+    }
+
+    // Delegación por consentimiento vencido (workflow programado de n8n):
+    // las solicitudes cuyo cliente no aceptó la política en el plazo se derivan
+    // a un agente humano. Devuelve, por cada una, el correo de delegación al
+    // agente y el aviso al cliente.
+    if (metodo === 'GET' && query.accion === 'consentimiento_vencido') {
+      const delegados = await delegarConsentimientosVencidos({ horas: query.horas });
+      return respuestaJson(200, { delegados: delegados.length, casos: delegados });
     }
 
     // n8n avisa el hilo del correo de delegación recién enviado al agente.

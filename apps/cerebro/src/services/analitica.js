@@ -398,7 +398,15 @@ export async function obtenerConversacionDetalle(id) {
     categoria: categoriaDesdeEventos(conv.eventos || []),
     creadoEn: conv.creadoEn || null,
     actualizadoEn: conv.actualizadoEn || null,
-    mensajes: (conv.mensajes || []).map((m) => ({ rol: m.rol, cuerpo: m.cuerpo, fecha: m.fecha || null })),
+    mensajes: (conv.mensajes || []).map((m) => ({
+      rol: m.rol,
+      cuerpo: m.cuerpo,
+      fecha: m.fecha || null,
+      // Correo del cliente (en mensajes del usuario) o del agente digital que
+      // respondió (en el mensaje de vuelta de un caso/ticket). null = asistente
+      // automático.
+      de: m.rol === 'usuario' ? conv.remitente || null : m.de || null,
+    })),
     eventos: (conv.eventos || []).map((e) => ({ tipo: e.tipo, detalle: e.detalle || null, fecha: e.fecha || null })),
     tickets: (conv.tickets || []).map((t) => ({
       jiraKey: t.jiraKey, tipo: t.tipo, equipo: t.equipo, estado: t.estado,

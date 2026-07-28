@@ -354,14 +354,12 @@ export async function resolverEscalamiento({ codigo, respuestaAgente, correoAgen
   );
 
   // El cliente no debe ver códigos internos (CASO-/PENDIENTE-): se le habla de
-  // "su solicitud". El encabezado se adapta a si fue un ticket o un caso.
-  const encabezado =
-    escalamiento.tipo === 'ticket'
-      ? 'Hemos atendido su solicitud. Esta es la respuesta de nuestro equipo:'
-      : 'Su solicitud fue atendida por nuestro equipo. Esta es la respuesta:';
+  // "su solicitud". El encabezado va en su propia línea y luego SOLO el
+  // contenido del agente (ya sin su saludo ni su firma personal), para que no se
+  // acumulen dos saludos ni dos firmas.
   const textoRespuesta =
     `Estimado/a usuario/a:\n\n` +
-    `${encabezado}\n\n` +
+    `Hemos atendido su solicitud.\n\n` +
     `${respuestaAgente}\n\n` +
     `Si necesita algo más, puede responder a este mismo correo.`;
 

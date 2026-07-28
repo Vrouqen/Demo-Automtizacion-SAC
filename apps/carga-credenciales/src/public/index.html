@@ -161,6 +161,33 @@
   .icon-btn.spinning svg { animation: spin .8s linear infinite; }
 
   /* Filtros de colegios y paginación */
+  /* Atajo a la carga individual, bajo el dropzone */
+  .o-bien {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-top: 14px; font-size: 13px; color: var(--text-muted); flex-wrap: wrap;
+  }
+
+  /* Modal de carga individual */
+  .modal-fondo {
+    position: fixed; inset: 0; z-index: 60; background: rgba(10,12,18,.55);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-fondo[hidden] { display: none !important; }
+  .modal {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    width: min(560px, 100%); max-height: 90vh; display: flex; flex-direction: column;
+    box-shadow: 0 16px 48px rgba(0,0,0,.35); overflow: hidden;
+  }
+  .modal-cab { display: flex; align-items: flex-start; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--border); }
+  .modal-sub { color: var(--text-muted); font-size: 12.5px; margin-top: 3px; line-height: 1.4; }
+  .modal-x {
+    margin-left: auto; background: none; border: none; color: var(--text-muted);
+    font-size: 17px; cursor: pointer; line-height: 1; padding: 3px 7px; border-radius: 6px;
+  }
+  .modal-x:hover { background: var(--bg); color: var(--text); }
+  .modal-cuerpo { padding: 20px 22px 22px; overflow-y: auto; }
+  .modal-cuerpo .submit { margin-top: 18px; }
+
   #lista-colegios { overflow-x: auto; }
   .col-filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
   .col-filtros input[type="search"] { flex: 1 1 240px; min-width: 160px; }
@@ -328,6 +355,11 @@
     </label>
     <div class="file-chip" id="file-chip"></div>
 
+    <div class="o-bien">
+      <span>¿Es solo una persona?</span>
+      <button type="button" class="link-btn" id="btn-individual">+ Agregar usuario individual</button>
+    </div>
+
     <button class="submit" id="btn-submit" type="submit">
       <span class="spinner"></span>
       <span id="btn-label">Cargar credenciales</span>
@@ -359,6 +391,59 @@
     <div class="brand">Tecnología Educativa Ecuador</div>
     <div>Quito, Ecuador — Santillana</div>
   </footer>
+</div>
+
+<!-- ─────────── Modal: carga de un usuario individual ─────────── -->
+<div class="modal-fondo" id="modal-fondo" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+    <div class="modal-cab">
+      <div>
+        <h2 id="modal-titulo" style="margin:0;font-size:15px">Agregar usuario individual</h2>
+        <div class="modal-sub" id="modal-contexto"></div>
+      </div>
+      <button type="button" class="modal-x" id="modal-x" aria-label="Cerrar">✕</button>
+    </div>
+
+    <form class="modal-cuerpo" id="form-individual">
+      <div class="platform-toggle" style="margin-bottom:16px">
+        <label><input type="radio" name="rol" value="estudiante" checked /> Estudiante</label>
+        <label><input type="radio" name="rol" value="docente" /> Docente</label>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="ind-nombres">Nombres</label>
+          <input type="text" id="ind-nombres" autocomplete="off" placeholder="Julissa Josefina" />
+        </div>
+        <div class="field">
+          <label for="ind-apellidos">Apellidos</label>
+          <input type="text" id="ind-apellidos" autocomplete="off" placeholder="Albán Cuestas" />
+        </div>
+        <div class="field" id="campo-nivel">
+          <label for="ind-nivel">Nivel</label>
+          <input type="text" id="ind-nivel" autocomplete="off" placeholder="2do de bachillerato" />
+        </div>
+        <div class="field" id="campo-paralelo">
+          <label for="ind-paralelo">Paralelo</label>
+          <input type="text" id="ind-paralelo" autocomplete="off" placeholder="A" />
+        </div>
+        <div class="field">
+          <label for="ind-login">Login <span style="color:var(--accent)">*</span></label>
+          <input type="text" id="ind-login" autocomplete="off" placeholder="julissajosefina.albancuestas" required />
+        </div>
+        <div class="field">
+          <label for="ind-contrasena">Contraseña <span style="color:var(--accent)">*</span></label>
+          <input type="text" id="ind-contrasena" autocomplete="off" placeholder="218159" required />
+        </div>
+      </div>
+
+      <button class="submit" id="btn-ind-submit" type="submit">
+        <span class="spinner"></span>
+        <span id="btn-ind-label">Guardar usuario</span>
+      </button>
+      <div class="banner" id="banner-individual"></div>
+    </form>
+  </div>
 </div>
 
 <script>
@@ -857,6 +942,129 @@
   });
   $('col-limite').addEventListener('change', function (e) {
     colFiltro.limite = Number(e.target.value) || 10; colFiltro.pagina = 1; renderColegios();
+  });
+
+  // ── Carga individual (modal) ────────────────────────────────────────────
+  // Un usuario suelto pertenece a un colegio + plataforma + periodo, igual que
+  // los del Excel. En vez de repetir esos campos en el modal, se REUSAN los ya
+  // elegidos arriba: así no hay dos fuentes de verdad ni riesgo de cargar a la
+  // persona en un colegio distinto al que se ve en pantalla.
+  var modalFondo = $('modal-fondo');
+  var formInd = $('form-individual');
+  var bannerInd = $('banner-individual');
+  var btnInd = $('btn-ind-submit'), btnIndLabel = $('btn-ind-label');
+
+  function contextoColegio() {
+    return {
+      idColegio: $('idColegio').value.trim(),
+      codigoColegio: $('codigoColegio').value.trim(),
+      nombreColegio: inputColegio.value.trim(),
+      region: selRegion.value,
+      ciudad: selProvincia.value,
+      canton: selCanton.value,
+      plataforma: formCarga.plataforma.value,
+      periodo: $('periodo').value,
+    };
+  }
+  function faltantesContexto(ctx) {
+    var faltan = [];
+    if (!ctx.nombreColegio) faltan.push('nombre del colegio');
+    if (!ctx.codigoColegio) faltan.push('código del colegio');
+    if (!ctx.plataforma) faltan.push('plataforma');
+    if (!ctx.periodo) faltan.push('periodo');
+    return faltan;
+  }
+
+  function abrirModalIndividual() {
+    var ctx = contextoColegio();
+    var faltan = faltantesContexto(ctx);
+    bannerInd.className = 'banner';
+    if (faltan.length > 0) {
+      mostrarBanner(banner, 'err',
+        'Antes de agregar un usuario, completa arriba: <b>' + escapeHtml(faltan.join(', ')) + '</b>.');
+      banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    var ubic = [ctx.canton, ctx.ciudad].filter(Boolean).join(', ');
+    $('modal-contexto').innerHTML =
+      'Se agregará a <b>' + escapeHtml(ctx.nombreColegio) + '</b>' + (ubic ? ' (' + escapeHtml(ubic) + ')' : '') +
+      '<br>' + escapeHtml(ctx.plataforma) + ' · ' + escapeHtml(ctx.periodo);
+    modalFondo.hidden = false;
+    setTimeout(function () { $('ind-nombres').focus(); }, 30);
+  }
+  function cerrarModalIndividual() {
+    modalFondo.hidden = true;
+    bannerInd.className = 'banner';
+  }
+
+  $('btn-individual').addEventListener('click', abrirModalIndividual);
+  $('modal-x').addEventListener('click', cerrarModalIndividual);
+  modalFondo.addEventListener('mousedown', function (e) { if (e.target === modalFondo) cerrarModalIndividual(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !modalFondo.hidden) cerrarModalIndividual();
+  });
+
+  // Nivel y paralelo solo aplican a estudiantes.
+  function refrescarCamposRol() {
+    var esDocente = formInd.rol.value === 'docente';
+    $('campo-nivel').style.display = esDocente ? 'none' : '';
+    $('campo-paralelo').style.display = esDocente ? 'none' : '';
+  }
+  Array.prototype.forEach.call(formInd.rol, function (r) {
+    r.addEventListener('change', refrescarCamposRol);
+  });
+  refrescarCamposRol();
+
+  formInd.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var ctx = contextoColegio();
+    var faltan = faltantesContexto(ctx);
+    if (faltan.length > 0) {
+      mostrarBanner(bannerInd, 'err', 'Faltan datos del colegio: <b>' + escapeHtml(faltan.join(', ')) + '</b>.');
+      return;
+    }
+    var rol = formInd.rol.value;
+    var cuerpo = {};
+    for (var k in ctx) cuerpo[k] = ctx[k];
+    cuerpo.individual = {
+      rol: rol,
+      nombres: $('ind-nombres').value.trim(),
+      apellidos: $('ind-apellidos').value.trim(),
+      login: $('ind-login').value.trim(),
+      contrasena: $('ind-contrasena').value.trim(),
+      nivel: $('ind-nivel').value.trim(),
+      paralelo: $('ind-paralelo').value.trim(),
+    };
+
+    btnInd.disabled = true; btnInd.classList.add('loading');
+    btnIndLabel.textContent = 'Guardando…'; bannerInd.className = 'banner';
+
+    api('', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(cuerpo),
+    }).then(function (r) {
+      if (!r.ok) {
+        mostrarBanner(bannerInd, 'err', '<b>No se pudo guardar:</b> ' + escapeHtml(r.datos.error || 'error desconocido'));
+        return;
+      }
+      var g = rol === 'docente' ? r.datos.docentes : r.datos.estudiantes;
+      var accion = g && g.nuevos ? 'agregado' : (g && g.actualizados ? 'actualizado (cambió su contraseña)' : 'ya estaba igual, sin cambios');
+      mostrarBanner(bannerInd, 'ok',
+        '<b>' + escapeHtml(cuerpo.individual.nombres + ' ' + cuerpo.individual.apellidos) + '</b> — ' +
+        (rol === 'docente' ? 'docente' : 'estudiante') + ' ' + accion + '.');
+      // Se limpian solo los datos de la persona: el colegio sigue elegido para
+      // poder cargar varios seguidos sin repetir el contexto.
+      ['ind-nombres', 'ind-apellidos', 'ind-nivel', 'ind-paralelo', 'ind-login', 'ind-contrasena']
+        .forEach(function (id) { $(id).value = ''; });
+      $('ind-nombres').focus();
+      cargarColegios();
+    }).catch(function (err) {
+      mostrarBanner(bannerInd, 'err', '<b>Error de red:</b> ' + escapeHtml(err.message));
+    }).finally(function () {
+      btnInd.disabled = false; btnInd.classList.remove('loading');
+      btnIndLabel.textContent = 'Guardar usuario';
+    });
   });
 
   // ── Arranque: reusa la sesión si sigue viva ─────────────────────────────

@@ -302,6 +302,24 @@ tengan las credenciales del Jira externo:
    Trigger** que haga polling del estado cada cierto tiempo, y termine con otro nodo Outlook Reply
    sobre el mismo `hiloId`/`mensajeId` guardado en Mongo.
 
+## 6b. Consentimiento de datos (política + delegación a 48 h)
+
+Antes de atender la primera solicitud de un cliente, el cerebro le pide **aceptar la política de
+tratamiento de datos** respondiendo `ACEPTO`. Esto NO necesita nada nuevo en el workflow principal —
+el cerebro lo maneja solo: envía la política, detecta el `ACEPTO`, y luego atiende la solicitud.
+
+Lo único que hay que importar es el **workflow programado** `workflow-consentimiento-vencido.json`:
+
+- Corre cada hora. Llama a `GET {URL-CEREBRO}/?accion=consentimiento_vencido&horas=48`.
+- El cerebro toma las solicitudes cuyo cliente NO aceptó la política en 48 h, las **delega a un
+  agente** (SLA 48–52 h) y devuelve, por cada una, el correo de delegación + el aviso al cliente.
+- El workflow envía la delegación al agente, registra el hilo (para el viaje de vuelta) y avisa al
+  cliente. Es idéntico en estructura a la rama *escalar* del workflow principal.
+
+Configura las credenciales de Outlook en sus dos nodos (igual que en los demás). El texto de la
+política y los plazos se editan en el cerebro (`services/consentimiento.js` y las variables
+`CONSENTIMIENTO_*`); si quieres desactivar toda la verificación, `CONSENTIMIENTO_HABILITADO=false`.
+
 ## 7. Analítica y reportes
 
 - `GET {URL-CEREBRO}/?reporte=analitica` — resumen agregado (tickets por tipo/estado, eventos por

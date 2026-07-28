@@ -104,6 +104,50 @@ function error400(mensaje) {
 }
 
 /**
+ * Construye el paquete de datos para la carga de UN solo usuario (desde el
+ * formulario individual, sin Excel). Devuelve exactamente la misma forma que
+ * `parsearExcelCredenciales`, de modo que el resto del flujo —fusión con lo ya
+ * guardado, cifrado y resumen— es idéntico y no hay un camino paralelo que
+ * mantener.
+ *
+ * El nombre completo se arma aquí (no se confía en el cliente) para que la
+ * búsqueda difusa del cerebro encuentre a esta persona igual que a las que
+ * entraron por Excel.
+ */
+export function registroIndividual({ rol, nombres, apellidos, login, contrasena, nivel, paralelo }) {
+  const nombre = String(nombres || '').trim();
+  const apellido = String(apellidos || '').trim();
+  const usuario = String(login || '').trim();
+  const clave = String(contrasena || '').trim();
+
+  if (!usuario) throw error400('Falta el login del usuario');
+  if (!clave) throw error400('Falta la contraseña del usuario');
+  if (!nombre && !apellido) throw error400('Indica al menos el nombre o el apellido del usuario');
+
+  const esDocente = normalizar(rol) === 'docente';
+  const nombreCompleto = [nombre, apellido].filter(Boolean).join(' ').trim();
+
+  const reg = {
+    nombre: nombre || null,
+    apellidos: apellido || null,
+    // Nivel y paralelo solo aplican a estudiantes.
+    grado: esDocente ? null : String(nivel || '').trim() || null,
+    grupo: esDocente ? null : String(paralelo || '').trim() || null,
+    login: usuario,
+    contrasena: clave,
+    nombreCompleto,
+    nombreNormalizado: normalizar(nombreCompleto),
+  };
+
+  return {
+    estudiantes: esDocente ? [] : [reg],
+    docentes: esDocente ? [reg] : [],
+    hojasProcesadas: [{ hoja: 'carga individual', rol: esDocente ? 'docentes' : 'estudiantes', filas: 1 }],
+    hojasIgnoradas: [],
+  };
+}
+
+/**
  * Parsea un Excel de credenciales y devuelve estudiantes Y docentes.
  *
  * Reglas de asignación de cada hoja:

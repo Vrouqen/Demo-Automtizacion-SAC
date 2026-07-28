@@ -307,6 +307,14 @@ Las demás rutas de datos exigen `Authorization: Bearer <token>`.
 - La respuesta trae `estudiantes: { filas, nuevos, actualizados, sinCambios, totalPeriodo,
   totalColegio }` y `hojasIgnoradas`.
 
+El mismo `POST /` acepta **un usuario suelto** en vez del Excel: se manda `individual`
+(`{ rol: "estudiante"|"docente", nombres, apellidos, login, contrasena, nivel, paralelo }`) junto con
+los datos del colegio. `registroIndividual()` arma el mismo registro que produce el parser, de modo
+que la fusión, el cifrado y el resumen son idénticos — no hay un camino paralelo que mantener. En la
+UI es un **modal** que hereda el colegio, plataforma y periodo ya elegidos arriba (una sola fuente de
+verdad), oculta nivel/paralelo cuando es docente, y tras guardar limpia solo los datos de la persona
+para poder cargar varias seguidas.
+
 **`GET /?listar=1`** — lista los colegios cargados (sin credenciales), con región/ciudad/cantón,
 plataformas y periodos cargados, y cantidad de **estudiantes y docentes**.
 

@@ -14,6 +14,8 @@ import { coleccionConversaciones } from '../db/mongo.js';
 import { limpiarCuerpoCorreo, textoAHtml, extraerEmail } from '../utils/correo.js';
 import { conFirmaTexto } from '../utils/firma.js';
 import { clasificarCorreoBasura } from '../utils/clasificacion.js';
+import { esCorreoInterno } from '../config.js';
+import { yaConsintio, marcarConsentimiento, esAceptacion, textoPolitica } from '../services/consentimiento.js';
 
 const MAX_ITERACIONES_TOOLS = 6;
 
@@ -805,17 +807,17 @@ export function redactarRespuestaDeterminista(nombre, resultado) {
     }
     case 'crear_ticket': {
       if (!resultado.jiraKey) return null;
-      // Acuse breve al cliente. NO se muestra el código interno (PENDIENTE-XXX):
-      // es interno y poco profesional. La respuesta real del equipo llega sola a
-      // este mismo hilo (viaje de vuelta del ticket).
+      // ACUSE al cliente. NO se muestra el código interno (PENDIENTE-XXX): es
+      // interno. Se le dice que una PERSONA del equipo atenderá su caso; la
+      // respuesta real llega sola a este mismo hilo (viaje de vuelta del ticket).
       const motivo =
         resultado.tipo === 'reset_password'
           ? 'el reseteo de la contraseña'
           : 'la incidencia que reportaste en la plataforma';
       return (
-        `Gracias por escribirnos. Recibimos tu solicitud sobre ${motivo} y ya la estamos gestionando.\n\n` +
-        'Te responderemos por este mismo correo en cuanto tengamos la solución. Si deseas agregar más ' +
-        'información, puedes responder aquí mismo.' +
+        `Gracias por escribirnos. Recibimos tu solicitud sobre ${motivo}.\n\n` +
+        'Una persona de nuestro equipo la atenderá y te responderemos por este mismo correo con la ' +
+        'solución. Si deseas agregar más información, puedes responder aquí mismo.' +
         FIRMA
       );
     }
@@ -962,6 +964,44 @@ export async function procesarCorreo({
     conversacion = await col.findOne({ _id: hiloId });
   }
 
+  // ── PUERTA DE CONSENTIMIENTO ────────────────────────────────────────────
+  // Antes de atender la solicitud, el cliente debe aceptar la política de datos
+  // (una vez, guardada por su correo). Si no la ha aceptado, se le envía la
+  // política y el hilo queda 'esperando_consentimiento' hasta que responda
+  // ACEPTO. Un job programado delega a un agente si no acepta en el plazo.
+  let consentimientoRecienAceptado = false;
+  if (config.consentimiento.habilitado && !esCorreoInterno(remitente)) {
+    const yaAcepto = await yaConsintio({ conversacion, remitente });
+    if (!yaAcepto) {
+      const esperando = conversacion.estado === 'esperando_consentimiento';
+      if (esperando && esAceptacion(cuerpo)) {
+        // El cliente ACABA de aceptar: se registra y se cae al flujo normal para
+        // atender la solicitud ORIGINAL (que está en el historial del hilo).
+        await marcarConsentimiento({ hiloId, remitente });
+        await registrarEvento(hiloId, { tipo: 'consentimiento_aceptado', detalle: {} });
+        consentimientoRecienAceptado = true;
+      } else {
+        // Aún no acepta: se le manda la política y el hilo queda a la espera.
+        if (!esperando) {
+          await actualizarEstado(hiloId, 'esperando_consentimiento');
+          await registrarEvento(hiloId, { tipo: 'politica_enviada', detalle: {} });
+        }
+        const texto = textoPolitica();
+        await registrarMensaje(hiloId, { rol: 'asistente', cuerpo: texto });
+        return {
+          hiloId,
+          accion: 'responder',
+          estado: 'esperando_consentimiento',
+          mensajeIdRespuesta: mensajeId || null,
+          textoRespuesta: conFirmaTexto(texto),
+          textoRespuestaHtml: textoAHtml(texto),
+          ticket: null,
+          escalamiento: null,
+        };
+      }
+    }
+  }
+
   // Historial de solo texto (usuario/asistente); no se reintenta reproducir
   // tool calls pasados — si el modelo necesita el dato de nuevo, vuelve a
   // llamar la herramienta, lo cual además refleja datos actualizados.
@@ -977,6 +1017,21 @@ export async function procesarCorreo({
     }))
     .filter((c) => c.parts[0].text.trim() !== '')
     .slice(-20);
+
+  // El cliente acaba de aceptar la política: se le indica al modelo que atienda
+  // la solicitud ORIGINAL (más arriba en el historial), sin repetir la política
+  // ni tratar "ACEPTO" como si fuera la consulta.
+  if (consentimientoRecienAceptado) {
+    contents.push({
+      role: 'user',
+      parts: [{
+        text:
+          'AVISO DEL SISTEMA: el usuario acaba de ACEPTAR la política de tratamiento de datos. No ' +
+          'vuelvas a mencionarla ni a pedirla. Atiende ahora su solicitud ORIGINAL, que está más ' +
+          'arriba en el historial de esta conversación (no el mensaje "ACEPTO").',
+      }],
+    });
+  }
 
   // El correo llegó recortado: se avisa al modelo para que no confunda "dato
   // ausente" con "dato cortado" y vuelva a pedir lo que el usuario ya escribió.

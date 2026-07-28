@@ -1,0 +1,261 @@
+{
+  "name": "Soporte SAC - Delegacion por consentimiento vencido (48h)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "sched-consent",
+      "name": "Schedule Trigger (cada hora)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "accion",
+              "value": "consentimiento_vencido"
+            },
+            {
+              "name": "horas",
+              "value": "48"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-consent",
+      "name": "HTTP: consentimiento_vencido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        230,
+        0
+      ],
+      "notes": "Pide al cerebro las solicitudes cuyo cliente no acepto la politica en 48 h. Devuelve, por cada una, la delegacion al agente y el aviso al cliente. Ajusta 'horas' si cambias CONSENTIMIENTO_HORAS."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "casos",
+        "options": {}
+      },
+      "id": "split-consent",
+      "name": "Split Out: casos",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toRecipients": "={{ $json.escalamiento.correoDelegacion.para }}",
+        "subject": "={{ $json.escalamiento.correoDelegacion.asunto }}",
+        "bodyContent": "={{ $json.escalamiento.correoDelegacion.cuerpoHtml ?? $json.escalamiento.correoDelegacion.cuerpo }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "outlook-deleg-consent",
+      "name": "Outlook: Enviar delegacion a agente",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        690,
+        0
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REEMPLAZAR",
+          "name": "Outlook soporte"
+        }
+      },
+      "notes": "Delega al agente humano la solicitud del cliente que no acepto la politica. El agente responde a ESTE aviso y su respuesta vuelve sola al cliente (viaje de vuelta)."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/?accion=registrar_delegacion",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ codigo: $('Split Out: casos').item.json.escalamiento.codigo, conversationIdDelegacion: $json.conversationId, mensajeIdDelegacion: $json.id }) }}",
+        "options": {}
+      },
+      "id": "http-reg-consent",
+      "name": "HTTP: registrar hilo de delegacion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Guarda el conversationId del aviso al agente para reconocer su respuesta y reenviarla al cliente."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Split Out: casos').item.json.mensajeIdCliente }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-msg-consent",
+      "name": "IF: hay mensaje al cliente",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1150,
+        0
+      ],
+      "notes": "Sin el id del correo original del cliente no se puede avisarle en su hilo. true = se puede responder."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $('Split Out: casos').item.json.mensajeIdCliente }}",
+        "message": "={{ $('Split Out: casos').item.json.textoRespuestaHtml ?? $('Split Out: casos').item.json.textoRespuesta }}",
+        "additionalFields": {
+          "replyToSenderOnly": true,
+          "bodyContentType": "html"
+        }
+      },
+      "id": "outlook-reply-consent",
+      "name": "Outlook: Avisar al cliente",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        -80
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REEMPLAZAR",
+          "name": "Outlook soporte"
+        }
+      },
+      "notes": "Le avisa al cliente que su solicitud sera atendida por un agente en 48-52 h (porque no acepto la politica). replyToSenderOnly => solo al cliente."
+    },
+    {
+      "parameters": {
+        "content": "## Delegacion por consentimiento vencido\n1. Cada hora, pide al cerebro las solicitudes cuyo cliente NO acepto la politica de datos en 48 h.\n2. Por cada una: envia la delegacion al AGENTE, registra el hilo del aviso, y avisa al CLIENTE que un agente lo atendera en 48-52 h.\n3. Cuando el agente responde al aviso, su respuesta vuelve sola al cliente (mismo viaje de vuelta que un caso normal).\n\nEl cliente puede responder ACEPTO en cualquier momento ANTES: en ese caso el flujo principal atiende su solicitud de forma automatica y este job ya no lo toma.",
+        "height": 260,
+        "width": 420
+      },
+      "id": "notas-consent",
+      "name": "Notas",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        230,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (cada hora)": {
+      "main": [
+        [
+          {
+            "node": "HTTP: consentimiento_vencido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: consentimiento_vencido": {
+      "main": [
+        [
+          {
+            "node": "Split Out: casos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out: casos": {
+      "main": [
+        [
+          {
+            "node": "Outlook: Enviar delegacion a agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Enviar delegacion a agente": {
+      "main": [
+        [
+          {
+            "node": "HTTP: registrar hilo de delegacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: registrar hilo de delegacion": {
+      "main": [
+        [
+          {
+            "node": "IF: hay mensaje al cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: hay mensaje al cliente": {
+      "main": [
+        [
+          {
+            "node": "Outlook: Avisar al cliente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
