@@ -5,6 +5,8 @@ import { config, validarConfig } from './config.js';
 import { parsearExcelCredenciales, registroIndividual } from './excel/parseExcel.js';
 import { coleccionColegios } from './db/mongo.js';
 import { normalizar } from './utils/similitud.js';
+import { buscarPorNombre } from './utils/busquedaNombre.js';
+import { ordenarGrados, ordenarParalelos } from './utils/grados.js';
 import { cifrar, descifrar } from './utils/cifrado.js';
 import { crearToken, verificarToken, tokenDeEvento, igualSeguro } from './utils/sesion.js';
 
@@ -58,7 +60,13 @@ export const handler = async (event) => {
     const metodo = event.requestContext?.http?.method || 'POST';
     const query = event.queryStringParameters || {};
 
-    if (metodo === 'GET' && !query.listar) {
+    // El formulario web solo se sirve cuando la petición NO pide datos. TODO
+    // endpoint de consulta debe quedar excluido aquí: si se olvida alguno, esta
+    // guarda lo intercepta y devuelve HTML donde el llamador espera JSON (que es
+    // justo lo que pasaba con ?opciones y ?buscar).
+    const pideDatos = Boolean(query.listar || query.opciones || query.buscar);
+
+    if (metodo === 'GET' && !pideDatos) {
       return {
         statusCode: 200,
         headers: { 'content-type': 'text/html; charset=utf-8' },
@@ -89,40 +97,189 @@ export const handler = async (event) => {
 
     if (metodo === 'GET' && query.listar) {
       const col = await coleccionColegios();
-      // Solo lo necesario para el listado: nunca las credenciales, y tampoco el
-      // padrón de docentes (el programa ya no gestiona sus credenciales).
+
+      // El resumen lo calcula Mongo, no Node. Antes se traía un subdocumento por
+      // cada estudiante de cada colegio (miles) solo para deducir periodos y
+      // plataformas distintos: era la razón de que el selector de colegios
+      // tardara en responder al abrir la pantalla. Con $setUnion viajan unas
+      // pocas decenas de bytes por colegio.
       const docs = await col
-        .find(
-          {},
+        .aggregate([
           {
-            projection: {
+            $project: {
               nombre: 1, codigo: 1, region: 1, ciudad: 1, canton: 1,
-              'estudiantes.plataforma': 1, 'estudiantes.periodo': 1,
-              'docentes.plataforma': 1, 'docentes.periodo': 1,
+              plataformas: {
+                $setUnion: [
+                  { $ifNull: ['$estudiantes.plataforma', []] },
+                  { $ifNull: ['$docentes.plataforma', []] },
+                ],
+              },
+              periodos: {
+                $setUnion: [
+                  { $ifNull: ['$estudiantes.periodo', []] },
+                  { $ifNull: ['$docentes.periodo', []] },
+                ],
+              },
+              estudiantes: { $size: { $ifNull: ['$estudiantes', []] } },
+              docentes: { $size: { $ifNull: ['$docentes', []] } },
             },
-          }
-        )
+          },
+          { $sort: { nombre: 1 } },
+        ])
         .toArray();
+
       return respuestaJson(
         200,
-        docs.map((d) => {
-          const est = d.estudiantes || [];
-          const doc = d.docentes || [];
-          const todos = [...est, ...doc];
-          return {
-            id: d._id,
-            codigo: d.codigo,
-            nombre: d.nombre,
-            region: d.region,
-            ciudad: d.ciudad,
-            canton: d.canton,
-            plataformas: [...new Set(todos.map((r) => r.plataforma).filter(Boolean))],
-            periodos: [...new Set(todos.map((r) => r.periodo).filter(Boolean))].sort(),
-            estudiantes: est.length,
-            docentes: doc.length,
-          };
-        })
+        docs.map((d) => ({
+          id: d._id,
+          codigo: d.codigo,
+          nombre: d.nombre,
+          region: d.region,
+          ciudad: d.ciudad,
+          canton: d.canton,
+          // $setUnion ya viene ordenado y sin repetidos; solo se quitan vacíos.
+          plataformas: (d.plataformas || []).filter(Boolean),
+          periodos: (d.periodos || []).filter(Boolean),
+          estudiantes: d.estudiantes,
+          docentes: d.docentes,
+        }))
       );
+    }
+
+    // Valores que existen de verdad para un colegio y periodo, para poblar los
+    // desplegables en cascada. También aquí filtra y deduplica Mongo: traer el
+    // padrón entero para sacar una docena de grados sería tirar ancho de banda.
+    if (metodo === 'GET' && query.opciones) {
+      const { colegioId, periodo, grado } = query;
+      if (!colegioId || !periodo) {
+        return respuestaJson(400, { error: 'Elige un colegio y un periodo para ver los filtros' });
+      }
+
+      const col = await coleccionColegios();
+      const delPeriodo = {
+        $filter: {
+          input: { $ifNull: ['$estudiantes', []] },
+          as: 'e',
+          cond: { $eq: ['$$e.periodo', periodo] },
+        },
+      };
+
+      const [doc] = await col
+        .aggregate([
+          { $match: { _id: colegioId } },
+          {
+            $project: {
+              _id: 0,
+              grados: { $setUnion: [{ $map: { input: delPeriodo, as: 'e', in: '$$e.grado' } }, []] },
+              // Los paralelos dependen del grado elegido: si ya hay uno, solo se
+              // ofrecen los suyos.
+              paralelos: {
+                $setUnion: [
+                  {
+                    $map: {
+                      input: {
+                        $filter: {
+                          input: { $ifNull: ['$estudiantes', []] },
+                          as: 'e',
+                          cond: grado
+                            ? { $and: [{ $eq: ['$$e.periodo', periodo] }, { $eq: ['$$e.grado', grado] }] }
+                            : { $eq: ['$$e.periodo', periodo] },
+                        },
+                      },
+                      as: 'e',
+                      in: '$$e.grupo',
+                    },
+                  },
+                  [],
+                ],
+              },
+              total: { $size: delPeriodo },
+            },
+          },
+        ])
+        .toArray();
+
+      if (!doc) return respuestaJson(404, { error: 'Colegio no encontrado' });
+
+      return respuestaJson(200, {
+        grados: ordenarGrados((doc.grados || []).filter(Boolean)),
+        paralelos: ordenarParalelos((doc.paralelos || []).filter(Boolean)),
+        total: doc.total || 0,
+      });
+    }
+
+    // Consultar credenciales: búsqueda real. Solo descifra la PÁGINA de
+    // resultados devuelta, nunca el padrón completo del colegio. Solo
+    // estudiantes (esta app ya no gestiona credenciales de docentes).
+    if (metodo === 'GET' && query.buscar) {
+      const { colegioId, periodo, grado, paralelo } = query;
+      if (!colegioId || !periodo) {
+        return respuestaJson(400, { error: 'Elige un colegio y un periodo para consultar credenciales' });
+      }
+
+      const col = await coleccionColegios();
+
+      // El recorte por periodo/grado/paralelo lo hace Mongo. Traer el padrón
+      // completo para descartarlo en Node encarecía cada consulta, y ahora los
+      // filtros se aplican solos en cuanto el usuario cambia uno.
+      const condiciones = [{ $eq: ['$$e.periodo', periodo] }];
+      if (grado) condiciones.push({ $eq: ['$$e.grado', grado] });
+      if (paralelo) condiciones.push({ $eq: ['$$e.grupo', paralelo] });
+
+      const [doc] = await col
+        .aggregate([
+          { $match: { _id: colegioId } },
+          {
+            $project: {
+              nombre: 1,
+              codigo: 1,
+              estudiantes: {
+                $filter: {
+                  input: { $ifNull: ['$estudiantes', []] },
+                  as: 'e',
+                  cond: { $and: condiciones },
+                },
+              },
+            },
+          },
+        ])
+        .toArray();
+
+      if (!doc) return respuestaJson(404, { error: 'Colegio no encontrado' });
+
+      let filtrados = doc.estudiantes || [];
+
+      // El nombre se busca sobre TODO lo que quedó y antes de paginar: si se
+      // aplicara después, solo miraría los 20 de la página actual y parecería
+      // que el estudiante no existe.
+      if (query.nombre && String(query.nombre).trim()) {
+        filtrados = buscarPorNombre(filtrados, String(query.nombre));
+      }
+
+      const limite = Math.min(Math.max(parseInt(query.limite, 10) || 20, 1), 100);
+      const pagina = Math.max(parseInt(query.pagina, 10) || 1, 1);
+      const inicio = (pagina - 1) * limite;
+      const slice = filtrados.slice(inicio, inicio + limite);
+
+      const resultados = slice.map((e) => ({
+        nombre: e.nombre,
+        apellidos: e.apellidos,
+        nombreCompleto: e.nombreCompleto,
+        grado: e.grado,
+        grupo: e.grupo,
+        plataforma: e.plataforma,
+        login: descifrar(e.login, config.cifrado.clave),
+        contrasena: descifrar(e.contrasena, config.cifrado.clave),
+      }));
+
+      return respuestaJson(200, {
+        colegio: { id: doc._id, nombre: doc.nombre, codigo: doc.codigo },
+        periodo,
+        total: filtrados.length,
+        pagina,
+        limite,
+        resultados,
+      });
     }
 
     if (!event.body) {
