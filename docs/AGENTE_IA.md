@@ -473,6 +473,19 @@ reintentable (cuota de IA agotada, caso sin destinatario).
 > o el usuario recibe las etiquetas en crudo. El sistema detecta el primer caso y avisa al modelo,
 > pero es una mitigación, no una solución.
 
+### Formato de los correos
+
+Las plantillas marcan lo importante entre `**dobles asteriscos**`. El sistema lo convierte en negrita
+**solo en la versión HTML**; en la versión de texto plano las marcas se quitan, para que quien lea el
+correo sin formato no se encuentre los asteriscos sueltos.
+
+La conversión se aplica **después** de escapar el HTML, así que un `<script>` que venga en el texto se
+escapa y nunca llega a ejecutarse: lo único capaz de producir etiquetas es esa conversión.
+
+El modelo tiene **prohibido** usar asteriscos en sus respuestas (está en sus instrucciones), de modo
+que las negritas quedan bajo control de las plantillas y no dependen de que la IA acierte con el
+formato.
+
 ### Configuración
 
 | Variable | Para qué |

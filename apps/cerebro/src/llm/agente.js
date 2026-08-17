@@ -786,9 +786,9 @@ export function redactarRespuestaDeterminista(nombre, resultado) {
   if (resultado.status === 'FALTA_INFORMACION' && Array.isArray(resultado.faltan) && resultado.faltan.length > 0) {
     return (
       'Hola, gracias por escribirnos.\n\n' +
-      'Con gusto atendemos su solicitud. Para poder gestionarla necesitamos algunos datos; ' +
+      'Con gusto atendemos su solicitud. Para poder gestionarla **necesitamos algunos datos**; ' +
       '¿podría respondernos a este mismo correo indicando lo siguiente?\n\n' +
-      resultado.faltan.map((f) => `- ${f}`).join('\n') +
+      resultado.faltan.map((f) => `- **${f}**`).join('\n') +
       '\n\nSi alguno de esos datos no lo tiene a la mano, indíquenoslo también y continuamos con lo que haya.' +
       FIRMA
     );
@@ -817,17 +817,17 @@ export function redactarRespuestaDeterminista(nombre, resultado) {
           : 'la incidencia que reportaste en la plataforma';
       return (
         `Gracias por escribirnos. Recibimos tu solicitud sobre ${motivo}.\n\n` +
-        'Una persona de nuestro equipo la atenderá y te responderemos por este mismo correo con la ' +
-        'solución. Si deseas agregar más información, puedes responder aquí mismo.' +
+        '**Una persona de nuestro equipo la atenderá** y te responderemos por **este mismo correo** ' +
+        'con la solución. Si deseas agregar más información, puedes responder aquí mismo.' +
         FIRMA
       );
     }
     case 'derivar_a_agente_digital': {
       if (resultado.status !== 'OK' || !resultado.codigo) return null;
       return (
-        'Gracias por la información. Tu caso será atendido por un agente digital de servicio.\n\n' +
-        `Código del caso: ${resultado.codigo}\n\n` +
-        'La respuesta te llegará a este mismo hilo de correo; si deseas agregar más información, puedes responder aquí mismo.' +
+        'Gracias por la información. Tu caso será atendido por un **agente digital de servicio**.\n\n' +
+        `Código del caso: **${resultado.codigo}**\n\n` +
+        'La respuesta te llegará a **este mismo hilo de correo**; si deseas agregar más información, puedes responder aquí mismo.' +
         FIRMA
       );
     }

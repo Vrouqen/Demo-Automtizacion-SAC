@@ -206,7 +206,7 @@ export function validarConsentimiento(datos) {
 const CORREO_SOPORTE = (config.cuentasSoporte && config.cuentasSoporte[0]) || 'soporteecuador@santillana.com';
 
 const CAMPOS_PEDIDOS =
-  '- Autorizo: Sí\n' +
+  '- Autorizo: **Sí**\n' +
   '- Nombres del representante legal:\n' +
   '- Apellidos del representante legal:\n' +
   '- Cédula/ID del representante legal:\n' +
@@ -223,29 +223,30 @@ export function textoPolitica() {
   const horas = config.consentimiento.horasLimite;
   return (
     'Hola, gracias por escribirnos.\n\n' +
-    'Antes de gestionar su solicitud necesitamos su consentimiento para tratar sus datos personales ' +
-    'y los del estudiante, conforme a la Ley Orgánica de Protección de Datos Personales del Ecuador ' +
-    '(LOPDP). Este consentimiento es independiente de cualquier término y condición que haya aceptado ' +
-    'antes.\n\n' +
-    `FINALIDAD\n${FINALIDAD}\n\n` +
-    'QUÉ TRATAMIENTOS CUBRE\n' +
-    '1. Uso de un servicio de inteligencia artificial de un tercero (Google) para leer su correo, ' +
+    'Antes de gestionar su solicitud necesitamos **su consentimiento para tratar sus datos personales ' +
+    'y los del estudiante**, conforme a la Ley Orgánica de Protección de Datos Personales del Ecuador ' +
+    '(LOPDP). **Este consentimiento es independiente de cualquier término y condición que haya ' +
+    'aceptado antes.**\n\n' +
+    `**FINALIDAD**\n${FINALIDAD}\n\n` +
+    '**QUÉ TRATAMIENTOS CUBRE**\n' +
+    '1. **Uso de un servicio de inteligencia artificial de un tercero (Google)** para leer su correo, ' +
     'validar la identidad del estudiante y preparar la respuesta.\n' +
-    '2. Tratamiento de los datos del estudiante (menor de edad) para localizar y entregarle sus ' +
+    '2. **Tratamiento de los datos del estudiante (menor de edad)** para localizar y entregarle sus ' +
     'credenciales de acceso a las plataformas educativas.\n' +
-    '3. Almacenamiento y procesamiento en servidores ubicados fuera del Ecuador, con las garantías ' +
-    'contractuales correspondientes.\n\n' +
-    'SUS DERECHOS\n' +
-    'Puede ejercer sus derechos de acceso, rectificación y eliminación, y retirar este consentimiento ' +
-    `en cualquier momento, escribiendo a ${CORREO_SOPORTE}. No compartimos sus datos con terceros ` +
-    'ajenos a la prestación del servicio y los conservamos solo el tiempo necesario para atenderle.\n\n' +
-    'PARA CONTINUAR\n' +
-    'Responda a este mismo correo copiando la siguiente lista y completándola:\n\n' +
+    '3. **Almacenamiento y procesamiento en servidores ubicados fuera del Ecuador**, con las ' +
+    'garantías contractuales correspondientes.\n\n' +
+    '**SUS DERECHOS**\n' +
+    'Puede ejercer sus derechos de **acceso, rectificación y eliminación**, y **retirar este ' +
+    'consentimiento en cualquier momento**, escribiendo a ' +
+    `${CORREO_SOPORTE}. No compartimos sus datos con terceros ajenos a la prestación del servicio y ` +
+    'los conservamos solo el tiempo necesario para atenderle.\n\n' +
+    '**PARA CONTINUAR**\n' +
+    'Responda a este mismo correo **copiando la siguiente lista y completándola**:\n\n' +
     CAMPOS_PEDIDOS +
-    '\n\nSi no desea otorgar el consentimiento, responda "No acepto" y su solicitud será atendida ' +
+    '\n\nSi no desea otorgar el consentimiento, responda **"No acepto"** y su solicitud será atendida ' +
     'igualmente por un agente de nuestro equipo.\n\n' +
-    `Si no recibimos su respuesta dentro de las próximas ${horas} horas, su caso será atendido ` +
-    'por un agente, que le responderá en un plazo de 48 a 52 horas.'
+    `Si no recibimos su respuesta dentro de las próximas **${horas} horas**, su caso será atendido ` +
+    'por un agente, que le responderá en un plazo de **48 a 52 horas**.'
   );
 }
 
@@ -253,9 +254,9 @@ export function textoPolitica() {
 export function textoFaltanDatos(faltan) {
   return (
     'Gracias por responder.\n\n' +
-    'Para poder registrar su consentimiento y continuar con la solicitud, necesitamos que nos ' +
-    'confirme lo siguiente:\n\n' +
-    faltan.map((f) => `- ${f}`).join('\n') +
+    'Para poder registrar su consentimiento y continuar con la solicitud, **nos falta lo ' +
+    'siguiente**:\n\n' +
+    faltan.map((f) => `- **${f}**`).join('\n') +
     '\n\nPuede responder a este mismo correo indicando únicamente esos datos.'
   );
 }
@@ -264,10 +265,10 @@ export function textoFaltanDatos(faltan) {
 export function textoRechazo() {
   return (
     'Estimado/a usuario/a:\n\n' +
-    'Hemos registrado que no otorga el consentimiento para el tratamiento automatizado de los datos. ' +
-    'Respetamos su decisión y no procesaremos su solicitud por medios automáticos.\n\n' +
-    'Su solicitud será atendida directamente por un agente de nuestro equipo, que le responderá por ' +
-    'este mismo correo en un plazo de 48 a 52 horas.'
+    'Hemos registrado que **no otorga el consentimiento** para el tratamiento automatizado de los ' +
+    'datos. Respetamos su decisión y **no procesaremos su solicitud por medios automáticos**.\n\n' +
+    'Su solicitud será atendida **directamente por un agente** de nuestro equipo, que le responderá ' +
+    'por este mismo correo en un plazo de **48 a 52 horas**.'
   );
 }
 
@@ -276,9 +277,9 @@ export function textoDelegacionPorNoAceptar() {
   return (
     'Estimado/a usuario/a:\n\n' +
     'No recibimos su consentimiento para el tratamiento de datos dentro del plazo, por lo que su ' +
-    'solicitud será atendida directamente por un agente de nuestro equipo.\n\n' +
-    'Un agente le responderá por este mismo correo en un plazo de 48 a 52 horas. Si desea que la ' +
-    'atención sea inmediata y automática, puede enviarnos el consentimiento en cualquier momento.'
+    'solicitud será atendida **directamente por un agente** de nuestro equipo.\n\n' +
+    'Un agente le responderá por este mismo correo en un plazo de **48 a 52 horas**. Si desea que la ' +
+    'atención sea **inmediata y automática**, puede enviarnos el consentimiento en cualquier momento.'
   );
 }
 

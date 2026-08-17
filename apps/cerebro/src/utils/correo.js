@@ -131,6 +131,23 @@ function escaparHtml(texto) {
 }
 
 /**
+ * Marcas de negrita en los correos.
+ *
+ * Las plantillas del sistema escriben lo importante entre `**dobles
+ * asteriscos**` y aquí se convierte en <strong>. Se aplica DESPUÉS de escapar,
+ * de modo que sea imposible inyectar HTML desde el texto: lo único que puede
+ * producir etiquetas es esta función.
+ *
+ * El modelo tiene prohibido usar asteriscos (ver el prompt), así que las
+ * negritas quedan bajo control de las plantillas y no dependen de que la IA
+ * acierte con el formato.
+ */
+export function aNegritas(textoEscapado) {
+  return String(textoEscapado || '').replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>');
+}
+
+
+/**
  * Convierte texto plano (con \n) al HTML que Outlook renderiza: párrafos con
  * margen y <br> para saltos simples. Graph interpreta el cuerpo del reply como
  * HTML, así que sin esto los \n colapsan en un solo bloque de texto.
@@ -147,7 +164,10 @@ export function textoAHtml(texto, { firma = true } = {}) {
     .split(/\n{2,}/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .map((p) => `<p style="margin:0 0 12px 0;">${escaparHtml(p).replace(/\n/g, '<br>')}</p>`);
+    .map(
+      (p) =>
+        `<p style="margin:0 0 12px 0;">${aNegritas(escaparHtml(p)).replace(/\n/g, '<br>')}</p>`
+    );
   return (
     `<div style="font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.5;color:#222222;">` +
     parrafos.join('') +

@@ -43,6 +43,17 @@ const DESPEDIDAS = [
 ];
 
 /**
+ * Quita las marcas de negrita `**así**` que llevan las plantillas.
+ *
+ * Vive aquí, junto a quitarDespedida, y no en utils/correo.js, porque correo.js
+ * ya importa de este módulo: ponerlo allí y usarlo aquí crearía un ciclo. La
+ * conversión a <strong> sí vive en correo.js, que es quien arma el HTML.
+ */
+export function sinMarcasNegrita(texto) {
+  return String(texto || '').replace(/\*\*(.+?)\*\*/gs, '$1');
+}
+
+/**
  * Quita la despedida y el nombre del remitente del final del texto, tantas
  * veces como aparezcan (el modelo suele escribir las dos líneas seguidas).
  */
@@ -64,7 +75,9 @@ export function quitarDespedida(texto) {
 
 /** Añade la firma canónica al final de un texto plano, sin duplicarla. */
 export function conFirmaTexto(texto) {
-  return `${quitarDespedida(texto)}\n\n${FIRMA_TEXTO}`;
+  // La versión de texto plano no puede llevar negritas, así que se quitan las
+  // marcas: al lector le llegaría "**Sí**" en vez de resaltado.
+  return `${sinMarcasNegrita(quitarDespedida(texto))}\n\n${FIRMA_TEXTO}`;
 }
 
 const ENLACE = '#0b5fa5';
