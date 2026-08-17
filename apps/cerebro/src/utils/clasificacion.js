@@ -46,7 +46,9 @@ const SENALES_PUBLICIDAD = [
   // Llamadas a la acción típicas de campaña.
   /\b(reg[íi]strate ahora|inscr[íi]bete (?:ya|ahora)|comienza (?:gratis|ahora)|empieza (?:gratis|ahora)|obt[ée]n (?:tu|el|gratis)|act[íi]valo ahora|solicita (?:tu|ya)|reclama (?:tu|ya)|descarga (?:gratis|ahora)|sign up (?:now|today)|get started (?:free|now|today)|claim your|start (?:your )?free (?:trial|account)|learn more|shop now|buy now)\b/i,
   // Gancho comercial.
-  /\b(oferta (?:especial|exclusiva|limitada)|descuento(?:s)? del? \d|promoci[óo]n (?:especial|exclusiva|v[áa]lida)|precio especial|[úu]ltima oportunidad|por tiempo limitado|gratis por \d|cr[ée]dito(?:s)? gratis|free credit|special offer|limited time|% de descuento|\d+% off)\b/i,
+  // Los importes van con \d+ y no con \d: con un solo dígito, el \b del final
+  // choca contra la segunda cifra y "descuento del 40%" no se detectaba.
+  /\b(oferta (?:especial|exclusiva|limitada)|descuento(?:s)? del? \d+|promoci[óo]n (?:especial|exclusiva|v[áa]lida)|precio especial|[úu]ltima oportunidad|por tiempo limitado|gratis por \d+|cr[ée]dito(?:s)? gratis|free credit|special offer|limited time|% de descuento|\d+% off)\b/i,
   // Marketing de producto/eventos (el caso "Azure for Students" cae aquí).
   /\b(webinar|newsletter|bolet[íi]n (?:informativo|mensual|semanal)|[úu]nete al evento|[úu]nete a (?:la|nuestra) comunidad|s[íi]guenos en|prueba gratuita|free trial|plan (?:premium|pro|business)|licencia(?:s)? gratuita(?:s)?|beneficios? exclusivos?)\b/i,
 ];
@@ -86,17 +88,31 @@ export function clasificarCorreoBasura({ remitente, asunto, cuerpo }) {
   if (RESPUESTA_AUTOMATICA.test(asuntoTxt) || RESPUESTA_AUTOMATICA.test(cuerpoTxt.slice(0, 400))) {
     return { categoria: 'respuesta_automatica', senal: 'aviso de ausencia / auto-reply' };
   }
-  if (REMITENTE_AUTOMATICO.test(dir)) {
+  const pareceSoporte = INTENCION_SOPORTE.test(texto);
+  const senales = SENALES_PUBLICIDAD.filter((re) => re.test(texto)).length;
+
+  // Una consulta de soporte protege al correo de las reglas de REMITENTE, que
+  // hasta ahora se aplicaban antes y descartaban en silencio a un colegio que
+  // escribiera desde "notificaciones@" o "comunicaciones@" — direcciones muy
+  // normales en una secretaría.
+  //
+  // La protección se cae si además arrastra dos o más señales publicitarias:
+  // así el spam de vuelta a clases, que menciona "colegio" para colarse, sigue
+  // descartándose. Las reglas de rebote y auto-respuesta quedan fuera de esto y
+  // se evalúan antes, porque un rebote cita el asunto original y llevaría las
+  // mismas palabras de soporte.
+  const protegido = pareceSoporte && senales < 2;
+
+  if (!protegido && REMITENTE_AUTOMATICO.test(dir)) {
     return { categoria: 'remitente_automatico', senal: `buzón no atendido (${dir})` };
   }
-  if (DOMINIO_MASIVO.test(dir)) {
+  if (!protegido && DOMINIO_MASIVO.test(dir)) {
     return { categoria: 'envio_masivo', senal: `dominio de envío masivo (${dir})` };
   }
 
   // --- Publicidad: hacen falta dos señales, y ninguna intención de soporte ---
-  if (INTENCION_SOPORTE.test(texto)) return null;
+  if (pareceSoporte) return null;
 
-  const senales = SENALES_PUBLICIDAD.filter((re) => re.test(texto)).length;
   if (senales >= 2) {
     return { categoria: 'promocional', senal: `${senales} señales de correo publicitario` };
   }

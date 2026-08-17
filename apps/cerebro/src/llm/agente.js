@@ -15,7 +15,8 @@ import { limpiarCuerpoCorreo, textoAHtml, extraerEmail } from '../utils/correo.j
 import { conFirmaTexto } from '../utils/firma.js';
 import { clasificarCorreoBasura } from '../utils/clasificacion.js';
 import { esCorreoInterno } from '../config.js';
-import { yaConsintio, marcarConsentimiento, esAceptacion, textoPolitica } from '../services/consentimiento.js';
+import { yaConsintio, procesarRespuestaConsentimiento, textoPolitica } from '../services/consentimiento.js';
+import { encolar, desencolar } from '../services/cola.js';
 
 const MAX_ITERACIONES_TOOLS = 6;
 
@@ -964,34 +965,60 @@ export async function procesarCorreo({
     conversacion = await col.findOne({ _id: hiloId });
   }
 
-  // ── PUERTA DE CONSENTIMIENTO ────────────────────────────────────────────
-  // Antes de atender la solicitud, el cliente debe aceptar la política de datos
-  // (una vez, guardada por su correo). Si no la ha aceptado, se le envía la
-  // política y el hilo queda 'esperando_consentimiento' hasta que responda
-  // ACEPTO. Un job programado delega a un agente si no acepta en el plazo.
+  // ── PUERTA DE CONSENTIMIENTO (LOPDP) ────────────────────────────────────
+  // El consentimiento de protección de datos NO es una aceptación de términos:
+  // exige un registro individual con quién lo otorga, a quién representa, con
+  // qué relación y para qué finalidad. Hasta tenerlo completo no se atiende la
+  // solicitud. Un job programado delega a un agente si no responde en el plazo.
   let consentimientoRecienAceptado = false;
   if (config.consentimiento.habilitado && !esCorreoInterno(remitente)) {
     const yaAcepto = await yaConsintio({ conversacion, remitente });
     if (!yaAcepto) {
       const esperando = conversacion.estado === 'esperando_consentimiento';
-      if (esperando && esAceptacion(cuerpo)) {
-        // El cliente ACABA de aceptar: se registra y se cae al flujo normal para
-        // atender la solicitud ORIGINAL (que está en el historial del hilo).
-        await marcarConsentimiento({ hiloId, remitente });
-        await registrarEvento(hiloId, { tipo: 'consentimiento_aceptado', detalle: {} });
+
+      // Respuesta a la política: puede venir completa, incompleta o negada.
+      const respuesta = esperando
+        ? await procesarRespuestaConsentimiento({ hiloId, mensajeId, remitente, cuerpo })
+        : null;
+
+      if (respuesta?.resultado === 'otorgado') {
+        // Se registró el consentimiento: se cae al flujo normal para atender la
+        // solicitud ORIGINAL, que está más arriba en el historial del hilo.
+        await registrarEvento(hiloId, {
+          tipo: 'consentimiento_otorgado',
+          detalle: { registroId: respuesta.registro._id, parentesco: respuesta.registro.parentesco },
+        });
         consentimientoRecienAceptado = true;
       } else {
-        // Aún no acepta: se le manda la política y el hilo queda a la espera.
-        if (!esperando) {
-          await actualizarEstado(hiloId, 'esperando_consentimiento');
+        // Los tres caminos restantes contestan y dejan el hilo a la espera:
+        // negativa registrada, datos incompletos, o primer envío de la política.
+        let texto;
+        let estadoFinal = 'esperando_consentimiento';
+
+        if (respuesta?.resultado === 'rechazado') {
+          // Queda constancia de la negativa (exigido por la norma) y el caso
+          // pasa a una persona: no se le deja sin atención por no consentir.
+          await registrarEvento(hiloId, { tipo: 'consentimiento_negado', detalle: {} });
+          texto = respuesta.texto;
+          estadoFinal = 'esperando_agente';
+        } else if (respuesta?.resultado === 'faltan') {
+          await registrarEvento(hiloId, {
+            tipo: 'consentimiento_incompleto',
+            detalle: { faltan: respuesta.faltan },
+          });
+          texto = respuesta.texto;
+        } else {
           await registrarEvento(hiloId, { tipo: 'politica_enviada', detalle: {} });
+          texto = textoPolitica();
         }
-        const texto = textoPolitica();
+
+        await actualizarEstado(hiloId, estadoFinal);
         await registrarMensaje(hiloId, { rol: 'asistente', cuerpo: texto });
+
         return {
           hiloId,
           accion: 'responder',
-          estado: 'esperando_consentimiento',
+          estado: estadoFinal,
           mensajeIdRespuesta: mensajeId || null,
           textoRespuesta: conFirmaTexto(texto),
           textoRespuestaHtml: textoAHtml(texto),
@@ -1149,15 +1176,21 @@ export async function procesarCorreo({
     //    devolvemos un estado reintentable (el handler responde 503 y n8n no
     //    envía nada; el mismo correo se reprocesará limpio en el próximo intento).
     if (err.esErrorLLM) {
+      const motivo = err.esCuota ? 'cuota_agotada' : 'error_llm';
       await registrarEvento(hiloId, {
         tipo: err.esCuota ? 'error_llm_cuota' : 'error_llm',
         detalle: { mensaje: String(err.message).slice(0, 300) },
       });
+      // A la cola: los reintentos inmediatos de n8n no sirven cuando lo agotado
+      // es la cuota diaria, y el disparador de Outlook no vuelve a entregar este
+      // correo. Sin encolarlo aquí, el mensaje se perdería.
+      const enCola = await encolar({ hiloId, mensajeId, motivo });
       return {
         hiloId,
         accion: 'error_temporal',
         reintentable: true,
-        motivo: err.esCuota ? 'cuota_agotada' : 'error_llm',
+        motivo,
+        enCola,
         mensaje: 'El servicio de IA no está disponible temporalmente (posible límite de cuota). No se envió respuesta.',
       };
     }
@@ -1185,9 +1218,12 @@ export async function procesarCorreo({
   // enviamos un genérico "no pude procesar"; se trata como temporal/reintentable.
   if (!textoFinal || !textoFinal.trim()) {
     await registrarEvento(hiloId, { tipo: 'error_llm_sin_texto', detalle: {} });
-    return { hiloId, accion: 'error_temporal', reintentable: true, motivo: 'sin_texto' };
+    const enCola = await encolar({ hiloId, mensajeId, motivo: 'sin_texto' });
+    return { hiloId, accion: 'error_temporal', reintentable: true, motivo: 'sin_texto', enCola };
   }
 
+  // Hubo respuesta: si este correo venía de la cola, ya no pertenece a ella.
+  await desencolar(hiloId);
   await registrarMensaje(hiloId, { rol: 'asistente', cuerpo: textoFinal });
 
   // Estado final de la conversación (define quién debe cerrar / esperar):

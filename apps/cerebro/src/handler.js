@@ -17,7 +17,12 @@ import {
   registrarHiloDelegacion,
 } from './services/escalamientos.js';
 import { limpiarCuerpoCorreo, limpiarRespuestaAgente } from './utils/correo.js';
-import { delegarConsentimientosVencidos } from './services/consentimiento.js';
+import {
+  delegarConsentimientosVencidos,
+  listarConsentimientos,
+  consentimientosACsv,
+} from './services/consentimiento.js';
+import { drenarCola, estadoCola } from './services/cola.js';
 
 function respuestaJson(statusCode, cuerpo) {
   return {
@@ -108,7 +113,7 @@ export const handler = async (event) => {
 
     // El dashboard y sus reportes son de consulta interna. Si hay token
     // configurado, se exige en todos (la página lo propaga al pedir los datos).
-    const REPORTES_INTERNOS = ['analitica', 'conversaciones', 'conversacion'];
+    const REPORTES_INTERNOS = ['analitica', 'conversaciones', 'conversacion', 'consentimientos', 'cola'];
     const esConsultaInterna = query.vista === 'dashboard' || REPORTES_INTERNOS.includes(query.reporte);
     if (esConsultaInterna && config.dashboard.token && query.token !== config.dashboard.token) {
       return respuestaJson(401, { error: 'No autorizado' });
@@ -147,6 +152,32 @@ export const handler = async (event) => {
       return detalle ? respuestaJson(200, detalle) : respuestaJson(404, { error: 'Conversación no encontrada' });
     }
 
+    // Registro de consentimientos (LOPDP). Es el reporte que se entrega a
+    // auditoría: un registro individual por consentimiento, con las columnas y
+    // el orden exigidos. En CSV se descarga listo para abrir o archivar.
+    if (metodo === 'GET' && query.reporte === 'consentimientos') {
+      const registro = await listarConsentimientos({
+        desde: query.desde,
+        hasta: query.hasta,
+        limite: query.limite,
+      });
+
+      if (query.formato === 'csv') {
+        const hoy = new Date().toISOString().slice(0, 10);
+        return {
+          statusCode: 200,
+          headers: {
+            'content-type': 'text/csv; charset=utf-8',
+            'content-disposition': `attachment; filename="consentimientos-${hoy}.csv"`,
+            'cache-control': 'no-store',
+          },
+          body: consentimientosACsv(registro),
+        };
+      }
+
+      return respuestaJson(200, registro);
+    }
+
     if (metodo === 'GET' && query.reporte === 'estudiantes_activos') {
       if (!query.idColegio) {
         return respuestaJson(400, { error: 'Falta el parámetro idColegio (id del colegio en Pegasus)' });
@@ -160,6 +191,29 @@ export const handler = async (event) => {
       const horas = query.horas ? Number(query.horas) : 24;
       const casos = await cerrarConversacionesInactivas({ horas });
       return respuestaJson(200, { cerradas: casos.length, casos });
+    }
+
+    // Drenaje de la cola de correos que no se pudieron responder por falta de
+    // cuota de IA (workflow programado de n8n). Devuelve las respuestas listas
+    // para enviar y las delegaciones de los que ya esperaron demasiado.
+    if (metodo === 'GET' && query.accion === 'drenar_cola') {
+      const { respuestas, delegados, cola, cortadoPorCuota } = await drenarCola({
+        limite: query.limite,
+        procesar: procesarCorreo,
+      });
+      return respuestaJson(200, {
+        respondidos: respuestas.length,
+        respuestas,
+        delegados: delegados.length,
+        casos: delegados,
+        cola,
+        cortadoPorCuota,
+      });
+    }
+
+    // Estado de la cola, para vigilar que no crezca sin que nadie se entere.
+    if (metodo === 'GET' && query.reporte === 'cola') {
+      return respuestaJson(200, await estadoCola());
     }
 
     // Delegación por consentimiento vencido (workflow programado de n8n):

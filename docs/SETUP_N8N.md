@@ -304,15 +304,20 @@ tengan las credenciales del Jira externo:
 
 ## 6b. Consentimiento de datos (política + delegación a 48 h)
 
-Antes de atender la primera solicitud de un cliente, el cerebro le pide **aceptar la política de
-tratamiento de datos** respondiendo `ACEPTO`. Esto NO necesita nada nuevo en el workflow principal —
-el cerebro lo maneja solo: envía la política, detecta el `ACEPTO`, y luego atiende la solicitud.
+Antes de atender la primera solicitud, el cerebro pide el **consentimiento de tratamiento de datos**
+(LOPDP), que **no es lo mismo que aceptar unos términos y condiciones**: el representante responde
+"Sí" más ocho campos (sus nombres, apellidos y cédula, el parentesco, y los del estudiante), y con eso
+se crea un **registro individual** auditable.
+
+Esto NO necesita nada nuevo en el workflow principal — el cerebro lo maneja solo: envía la política,
+interpreta la respuesta, pide lo que falte, registra el consentimiento (o la negativa) y luego atiende
+la solicitud.
 
 Lo único que hay que importar es el **workflow programado** `workflow-consentimiento-vencido.json`:
 
 - Corre cada hora. Llama a `GET {URL-CEREBRO}/?accion=consentimiento_vencido&horas=48`.
-- El cerebro toma las solicitudes cuyo cliente NO aceptó la política en 48 h, las **delega a un
-  agente** (SLA 48–52 h) y devuelve, por cada una, el correo de delegación + el aviso al cliente.
+- El cerebro toma las solicitudes cuyo cliente NO respondió en 48 h, las **delega a un agente**
+  (SLA 48–52 h) y devuelve, por cada una, el correo de delegación + el aviso al cliente.
 - El workflow envía la delegación al agente, registra el hilo (para el viaje de vuelta) y avisa al
   cliente. Es idéntico en estructura a la rama *escalar* del workflow principal.
 
@@ -320,12 +325,41 @@ Configura las credenciales de Outlook en sus dos nodos (igual que en los demás)
 política y los plazos se editan en el cerebro (`services/consentimiento.js` y las variables
 `CONSENTIMIENTO_*`); si quieres desactivar toda la verificación, `CONSENTIMIENTO_HABILITADO=false`.
 
+El registro para auditoría se descarga con
+`GET {URL-CEREBRO}/?reporte=consentimientos&formato=csv&token=...`, con las once columnas exigidas.
+
+## 6c. Cola de correos sin cuota de IA (reintento cada 15 min)
+
+Cuando el proveedor de IA agota su cuota, el correo queda **encolado** en su conversación en vez de
+perderse. Hace falta porque el trigger de Outlook **no vuelve a entregar un correo ya entregado**: sin
+la cola, los reintentos del nodo HTTP se agotan en 15 segundos y el mensaje no se responde nunca.
+
+Importa `workflow-drenar-cola.json`:
+
+- Corre cada 15 minutos. Llama a `GET {URL-CEREBRO}/?accion=drenar_cola&limite=5`.
+- Devuelve dos listas: **`respuestas`** (correos ya resueltos, que se envían por las mismas ramas que
+  el flujo principal: responder / escalar / ticket) y **`casos`** (los que llevan más de 12 h
+  esperando y se delegan a una persona).
+- El ritmo real lo decide el cerebro: aplica espera creciente por correo (30 min → 6 h si fue la
+  cuota) y **corta el lote** si la cuota sigue agotada. Por eso el flujo puede correr cada 15 minutos
+  sin quemar intentos.
+
+Configura las credenciales de Outlook en sus **cuatro** nodos de envío. Para vigilar la cola:
+`GET {URL-CEREBRO}/?reporte=cola` devuelve cuántos correos esperan y desde cuándo — conviene tenerlo
+a la vista, porque una cola que crece sin que nadie se entere es la peor forma de fallar.
+
 ## 7. Analítica y reportes
 
 - `GET {URL-CEREBRO}/?reporte=analitica` — resumen agregado (tickets por tipo/estado, eventos por
   tipo — incluidos `escalado_a_agente` y `respuesta_agente_entregada` —, total de conversaciones).
 - `GET {URL-CEREBRO}/?reporte=estudiantes_activos&idColegio=<id Pegasus>` — cantidad de estudiantes
   activos de un colegio (activo = tiene credenciales cargadas), con desglose por plataforma (Compartir/CREO).
+- `GET {URL-CEREBRO}/?reporte=consentimientos` — registro de consentimientos LOPDP; con
+  `&formato=csv` se descarga listo para auditoría.
+- `GET {URL-CEREBRO}/?reporte=cola` — correos en espera por falta de cuota de IA.
+
+Los reportes de conversaciones, consentimientos y cola exigen `&token=` si `DASHBOARD_TOKEN` está
+configurado: contienen datos personales.
 
 Puedes armar un nodo HTTP Request + Schedule Trigger en n8n para traer cualquiera de los dos
 periódicamente a una hoja de Google Sheets o a un dashboard, sin tocar el cerebro.

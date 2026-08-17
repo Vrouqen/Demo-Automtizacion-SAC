@@ -4,3 +4,4 @@ auth_baileys/
 logs/
 tickets/
 *.log
+.playwright-mcp

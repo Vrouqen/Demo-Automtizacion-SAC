@@ -67,23 +67,49 @@ original del cliente, con la firma corporativa. El cliente nunca ve códigos int
 
 ## 3b. Consentimiento de tratamiento de datos
 
-Antes de atender la primera solicitud de un cliente, el cerebro exige que **acepte la política de
-tratamiento de datos** (LOPDP). El flujo es 100% por correo (no hay página web ni el correo ejecuta
-nada — encaja en el plan gratuito):
+> **El consentimiento PDP no es una aceptación de términos y condiciones.** Un "acepto" suelto no
+> sirve como prueba: la norma exige un **registro individual** que identifique a quien lo otorga, a
+> quién representa, con qué relación, para qué finalidad, y si lo otorgó o no.
 
-1. El cliente escribe pidiendo ayuda. El cerebro, si no tiene su aceptación registrada, responde con
+Antes de atender la primera solicitud, el cerebro exige el consentimiento. El flujo es 100% por correo
+(no hay página web ni el correo ejecuta nada — encaja en el plan gratuito):
+
+1. El cliente escribe pidiendo ayuda. El cerebro, si no tiene consentimiento registrado, responde con
    el **correo de política** y deja el hilo en `esperando_consentimiento`. No atiende la solicitud aún.
-2. El cliente **responde `ACEPTO`**. El cerebro registra la aceptación y **atiende la solicitud
-   original** que quedó en el historial. Por defecto la aceptación es **por solicitud** (cada hilo de
-   correo nuevo la vuelve a pedir — `CONSENTIMIENTO_ALCANCE=correo`); con `=cliente` se pide una vez
-   por correo del cliente y dura `CONSENTIMIENTO_VIGENCIA_DIAS`.
-3. Si **no acepta** dentro del plazo (`CONSENTIMIENTO_HORAS`, por defecto 48 h), un job programado de
+2. El representante responde con **"Sí"** y ocho campos: nombres, apellidos y cédula **suyos**,
+   parentesco, y nombres, apellidos y cédula **del estudiante**. Con todo completo y válido se crea el
+   registro y se **atiende la solicitud original** que quedó en el historial.
+3. Si responde **a medias**, se le piden solo los campos que faltan. Si **niega**, la negativa queda
+   registrada (`otorgado: false`) y su solicitud pasa a un agente humano.
+4. Si **no responde** dentro del plazo (`CONSENTIMIENTO_HORAS`, por defecto 48 h), un job programado de
    n8n (`workflow-consentimiento-vencido.json`) **delega su solicitud a un agente humano** (mismo
    viaje de vuelta que un caso) y le avisa que será atendido en **48 a 52 horas**.
 
-En alcance `correo` (por defecto) la aceptación se guarda como una marca en la **conversación**; en
-alcance `cliente` se guarda en la colección `consentimientos` (`_id` = correo, `vigenteHasta`). Se
-puede desactivar todo con `CONSENTIMIENTO_HABILITADO=false`.
+Las cédulas ecuatorianas se validan con su **dígito verificador** (módulo 10); se aceptan pasaporte y
+documento extranjero marcados como no verificados. El registro guarda además el **texto literal** de
+la respuesta, como prueba.
+
+El **registro individual se escribe siempre** en la colección `consentimientos`, sea cual sea el
+alcance: es el artefacto legal. El alcance solo decide cuándo se vuelve a pedir — por defecto en cada
+solicitud (`CONSENTIMIENTO_ALCANCE=correo`, marca en la conversación); con `=cliente` se pide una vez
+por dirección y dura `CONSENTIMIENTO_VIGENCIA_DIAS`. Se puede desactivar todo con
+`CONSENTIMIENTO_HABILITADO=false`.
+
+El reporte para auditoría sale de `?reporte=consentimientos` (con `&formato=csv` para descargarlo),
+con las once columnas exigidas en su orden.
+
+## 3c. Cola de correos sin cuota de IA
+
+Cuando el proveedor de IA agota su cuota, el correo **no se pierde**: queda encolado en su propia
+conversación (`pendienteIA`). Hacía falta porque el disparador de Outlook no vuelve a entregar un
+correo ya entregado, así que los reintentos cortos de n8n lo perdían para siempre.
+
+- Espera creciente y distinta según la causa: 30 min → 6 h si fue la cuota (suele ser diaria);
+  5 min → 2 h si fue un fallo puntual.
+- Se drena por lotes de 5, en orden de llegada, con `?accion=drenar_cola`
+  (`workflow-drenar-cola.json`, cada 15 min). Si vuelve a faltar cuota, la corrida se corta.
+- A las **12 h** el correo deja de esperar a la IA y se **delega a una persona**.
+- `?reporte=cola` dice cuántos esperan y desde cuándo.
 
 ## 4. Reglas de seguridad y privacidad
 
@@ -104,7 +130,7 @@ puede desactivar todo con `CONSENTIMIENTO_HABILITADO=false`.
 | **`conversaciones`** | Un doc por hilo de correo | `_id` = `conversationId`, `remitente`, `asunto`, `estado`, `mensajes[]`, `eventos[]`, `tickets[]` |
 | **`escalamientos`** | Un doc por ticket o caso derivado | `_id` = código, `tipo` (`caso`\|`ticket`), `hiloId` original, `agenteEmail`, `estado`, `respuestaAgente`, `conversationIdDelegacion` |
 | **`descartes`** | Un correo basura descartado | `remitente`, `asunto`, `categoria`, `senal` (para afinar el filtro) |
-| **`consentimientos`** | Aceptación de la política por cliente | `_id` = correo, `aceptadoEn`, `vigenteHasta` |
+| **`consentimientos`** | **Un registro individual por consentimiento**, otorgado o negado | `fecha`, `hora`, `representante{nombres,apellidos,cedula,correo}`, `representado{…}`, `parentesco`, `finalidad`, `otorgado`, `textoOriginal` |
 
 La **fuente de verdad de la analítica son los `eventos`** de cada conversación (no contadores
 aparte): así una métrica nueva se calcula hacia atrás sobre el histórico. El estado de la conversación
@@ -140,4 +166,5 @@ Va protegido con `DASHBOARD_TOKEN` (contiene datos sensibles).
   `CORREO_EQUIPO_CUENTAS`, `CORREO_EQUIPO_SERVICIO_DIGITAL`, `CONSENTIMIENTO_HABILITADO`,
   `CONSENTIMIENTO_HORAS`, `CONSENTIMIENTO_VIGENCIA_DIAS`.
 - Workflows de n8n: `workflow-soporte-correo.json` (principal), `workflow-cierre-inactivas.json`
-  (cierre 24 h), `workflow-consentimiento-vencido.json` (delegación 48 h).
+  (cierre 24 h), `workflow-consentimiento-vencido.json` (delegación 48 h) y
+  `workflow-drenar-cola.json` (reintento de correos sin cuota, cada 15 min).

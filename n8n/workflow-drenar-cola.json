@@ -1,0 +1,566 @@
+{
+  "name": "SAC - Drenar cola de correos sin cuota",
+  "nodes": [
+    {
+      "name": "Schedule Trigger (cada 15 min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -620,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "HTTP: drenar_cola",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/?accion=drenar_cola&limite=5",
+        "options": {}
+      }
+    },
+    {
+      "name": "Split Out: respuestas",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -180,
+        140
+      ],
+      "parameters": {
+        "fieldToSplitOut": "respuestas",
+        "options": {}
+      }
+    },
+    {
+      "name": "Switch: accion",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        60,
+        140
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "escalar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "responder_y_crear_ticket",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ticket"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "responder",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "responder"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Outlook: Enviar delegacion a agente",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        320,
+        0
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REEMPLAZAR",
+          "name": "Outlook soporte"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toRecipients": "={{ $json.escalamiento.correoDelegacion.para }}",
+        "subject": "={{ $json.escalamiento.correoDelegacion.asunto }}",
+        "bodyContent": "={{ $json.escalamiento.correoDelegacion.cuerpoHtml ?? $json.escalamiento.correoDelegacion.cuerpo }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      }
+    },
+    {
+      "name": "HTTP: registrar hilo de delegacion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/?accion=registrar_delegacion",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ codigo: $('Switch: accion').item.json.escalamiento.codigo, conversationIdDelegacion: $json.conversationId, mensajeIdDelegacion: $json.id }) }}",
+        "options": {}
+      }
+    },
+    {
+      "name": "Outlook: Avisar ticket al equipo",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        320,
+        160
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REEMPLAZAR",
+          "name": "Outlook soporte"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toRecipients": "={{ $json.ticket.correoTicket.para }}",
+        "subject": "={{ $json.ticket.correoTicket.asunto }}",
+        "bodyContent": "={{ $json.ticket.correoTicket.cuerpoHtml ?? $json.ticket.correoTicket.cuerpo }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      }
+    },
+    {
+      "name": "HTTP: registrar hilo ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/?accion=registrar_delegacion",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ codigo: $('Switch: accion').item.json.ticket.jiraKey, conversationIdDelegacion: $json.conversationId, mensajeIdDelegacion: $json.id }) }}",
+        "options": {}
+      }
+    },
+    {
+      "name": "IF: hay mensaje al que responder",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        800,
+        140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Switch: accion').item.json.mensajeIdRespuesta }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Outlook: Reply (mismo hilo)",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        140
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REEMPLAZAR",
+          "name": "Outlook soporte"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $('Switch: accion').item.json.mensajeIdRespuesta }}",
+        "message": "={{ $('Switch: accion').item.json.textoRespuestaHtml ?? $('Switch: accion').item.json.textoRespuesta }}",
+        "additionalFields": {
+          "replyToSenderOnly": true,
+          "bodyContentType": "html"
+        }
+      }
+    },
+    {
+      "name": "Split Out: casos",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -180,
+        480
+      ],
+      "parameters": {
+        "fieldToSplitOut": "casos",
+        "options": {}
+      }
+    },
+    {
+      "name": "Outlook: Delegacion por espera",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        60,
+        480
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REEMPLAZAR",
+          "name": "Outlook soporte"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toRecipients": "={{ $json.escalamiento.correoDelegacion.para }}",
+        "subject": "={{ $json.escalamiento.correoDelegacion.asunto }}",
+        "bodyContent": "={{ $json.escalamiento.correoDelegacion.cuerpoHtml ?? $json.escalamiento.correoDelegacion.cuerpo }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      }
+    },
+    {
+      "name": "HTTP: registrar hilo (espera)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://dq4jespco3wlobabm3ugdjbg640zdkyd.lambda-url.us-east-2.on.aws/?accion=registrar_delegacion",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ codigo: $('Split Out: casos').item.json.escalamiento.codigo, conversationIdDelegacion: $json.conversationId, mensajeIdDelegacion: $json.id }) }}",
+        "options": {}
+      }
+    },
+    {
+      "name": "IF: hay mensaje al cliente",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        560,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Split Out: casos').item.json.mensajeIdCliente }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Outlook: Avisar al cliente",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        800,
+        480
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REEMPLAZAR",
+          "name": "Outlook soporte"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $('Split Out: casos').item.json.mensajeIdCliente }}",
+        "message": "={{ $('Split Out: casos').item.json.textoRespuestaHtml ?? $('Split Out: casos').item.json.textoRespuesta }}",
+        "additionalFields": {
+          "replyToSenderOnly": true,
+          "bodyContentType": "html"
+        }
+      }
+    },
+    {
+      "name": "Notas",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        -120
+      ],
+      "parameters": {
+        "content": "## Drenaje de la cola de correos sin cuota\n\nCuando el servicio de IA se queda sin cuota, el correo NO se pierde: queda encolado en su conversación. Este flujo lo reintenta cada 15 minutos.\n\n- **respuestas**: correos ya resueltos → se responden por su rama (igual que el flujo principal).\n- **casos**: los que llevan más de 12 h esperando → se delegan a un agente y se avisa al cliente.\n\nEl cerebro decide el ritmo: aplica espera creciente y corta el lote si la cuota sigue agotada, así que este flujo puede correr seguido sin quemar intentos.\n\nRecuerda reemplazar la credencial de Outlook (id `REEMPLAZAR`).",
+        "height": 320,
+        "width": 460
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (cada 15 min)": {
+      "main": [
+        [
+          {
+            "node": "HTTP: drenar_cola",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: drenar_cola": {
+      "main": [
+        [
+          {
+            "node": "Split Out: respuestas",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split Out: casos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out: respuestas": {
+      "main": [
+        [
+          {
+            "node": "Switch: accion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: accion": {
+      "main": [
+        [
+          {
+            "node": "Outlook: Enviar delegacion a agente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outlook: Avisar ticket al equipo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: hay mensaje al que responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Enviar delegacion a agente": {
+      "main": [
+        [
+          {
+            "node": "HTTP: registrar hilo de delegacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: registrar hilo de delegacion": {
+      "main": [
+        [
+          {
+            "node": "IF: hay mensaje al que responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Avisar ticket al equipo": {
+      "main": [
+        [
+          {
+            "node": "HTTP: registrar hilo ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: registrar hilo ticket": {
+      "main": [
+        [
+          {
+            "node": "IF: hay mensaje al que responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: hay mensaje al que responder": {
+      "main": [
+        [
+          {
+            "node": "Outlook: Reply (mismo hilo)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Split Out: casos": {
+      "main": [
+        [
+          {
+            "node": "Outlook: Delegacion por espera",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Delegacion por espera": {
+      "main": [
+        [
+          {
+            "node": "HTTP: registrar hilo (espera)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: registrar hilo (espera)": {
+      "main": [
+        [
+          {
+            "node": "IF: hay mensaje al cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: hay mensaje al cliente": {
+      "main": [
+        [
+          {
+            "node": "Outlook: Avisar al cliente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
