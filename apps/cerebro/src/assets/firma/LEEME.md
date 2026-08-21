@@ -57,30 +57,27 @@ llamadas directas a Graph — ver `docs/SETUP_N8N.md`.
 Mientras `FIRMA_LOGOS` esté vacío, la firma sale **solo con texto** y no se emite
 ninguna etiqueta `<img>`: es preferible una firma sobria a una con cuadros rotos.
 
-## Archivos que FALTAN (el correo funciona sin ellos, pero sin imagen)
+## Piezas del diseño del correo al cliente
 
-El diseño nuevo del correo al cliente añade tres piezas. Mientras el PNG no esté
-en esta carpeta, esa parte simplemente **no se dibuja** — nunca sale un cuadro
-roto (`imagen()` comprueba que el archivo exista antes de emitir la etiqueta).
+| Archivo | Qué es | Original | Se muestra a | Dónde va |
+|---|---|---|---|---|
+| `edi-cabecera.png` | Banner EDI superior | 566×62 | 566×62 | Arriba del todo |
+| `edi-pie.png` | Banner EDI de contacto con QR | 566×63 | 566×63 | Bajo el cuerpo, antes de la confidencialidad |
+| `santillana-gptw.png` | Santillana + sello Great Place To Work | 204×64 | 200×63 | Cabecera de la firma |
 
-| Archivo | Qué es | Se muestra a | Dónde va |
-|---|---|---|---|
-| `edi-cabecera.png` | Banner morado "EDI · Ecosistema Digital Integrado 2.0" con la ilustración | 600×63 | Arriba del todo, antes del saludo |
-| `edi-pie.png` | Banner morado de contacto con el QR (`servicioalclienteec@santillana.com` / `1 800 212 000`) | 600×74 | Debajo del cuerpo, antes del aviso de confidencialidad |
-| `gptw.png` | Sello "Great Place To Work Certified" | 46×46 | En la firma, a la derecha del logo Santillana |
+Los banners van a su **tamaño natural**: ampliarlos los vería borrosos y
+reducirlos haría ilegible el texto y el QR del pie, que es justo lo único que hay
+que poder leer ahí.
 
-### Cómo prepararlos
+`santillana-gptw.png` sustituye a `santillana.png` en la firma. El logo suelto se
+conserva y se sigue sirviendo por `?logo=santillana` para otros usos.
 
-- **PNG**, fondo transparente en el sello; los banners pueden ir con su fondo
-  morado.
-- **Al doble de las medidas de la tabla** (p. ej. el banner a 1200 px de ancho):
-  las pantallas de alta densidad lo agradecen y el `width`/`height` del HTML lo
-  reduce al tamaño correcto.
-- **Ligeros**: por debajo de 60 KB cada uno. Viajan en cada correo y Outlook
-  penaliza los mensajes pesados.
-- Deben ser los **archivos originales**, no capturas de pantalla: una captura
-  reescalada se ve borrosa en la firma.
+Si una de estas imágenes falta, esa parte del correo simplemente no se dibuja:
+`imagen()` comprueba que el archivo exista antes de emitir la etiqueta, así que
+nunca sale un cuadro roto.
 
-Basta con dejarlos en esta carpeta con ese nombre exacto y volver a desplegar la
-Lambda; no hay que tocar código ni n8n. Se sirven solos en
-`{URL-CEREBRO}/?logo=edi-cabecera`, `?logo=edi-pie` y `?logo=gptw`.
+## Dónde van los archivos
+
+**En esta carpeta** (`apps/cerebro/src/assets/firma/`), no en `assets/`. El código
+los lee de aquí y el endpoint los sirve en `{URL-CEREBRO}/?logo=<slug>`, donde el
+slug es el nombre del archivo sin extensión.

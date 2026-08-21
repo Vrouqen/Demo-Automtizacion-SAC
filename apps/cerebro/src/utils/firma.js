@@ -134,18 +134,23 @@ export const LOGOS = [
   // sin que llegue a dominar la tira. Aun así el texto queda muy pequeño; para
   // que se lea de verdad haría falta una versión horizontal del logo.
   { cid: 'logo-creo', alt: 'sistemacreo.com', archivo: 'creo.png', ancho: 52, alto: 47 },
-  // Sello Great Place To Work, a la derecha del logo Santillana.
-  { cid: 'logo-gptw', alt: 'Great Place To Work Certified', archivo: 'gptw.png', ancho: 46, alto: 46 },
-  // Banners de EDI: cabecera y pie del correo al cliente. Anchos pensados para
-  // el ancho útil de Outlook (~600 px) sin desbordar en móvil.
-  { cid: 'banner-edi-cabecera', alt: 'EDI · Ecosistema Digital Integrado 2.0', archivo: 'edi-cabecera.png', ancho: 600, alto: 63 },
-  { cid: 'banner-edi-pie', alt: 'Consultas: servicioalclienteec@santillana.com o 1 800 212 000', archivo: 'edi-pie.png', ancho: 600, alto: 74 },
+  // Bloque de firma: Santillana + sello Great Place To Work en una sola pieza,
+  // tal como viene del archivo original (204x64). Sustituye a logo-santillana en
+  // la firma; ese sigue disponible por separado para otros usos.
+  { cid: 'logo-santillana-gptw', alt: 'Santillana · Great Place To Work Certified', archivo: 'santillana-gptw.png', ancho: 200, alto: 63 },
+  // Banners de EDI, a su tamaño NATURAL (566 px de ancho). No se escalan: al
+  // ampliarlos se verían borrosos y al reducirlos se perdería legibilidad del
+  // texto y del QR, que es lo único que hay que poder leer en el pie.
+  { cid: 'banner-edi-cabecera', alt: 'EDI · Ecosistema Digital Integrado 2.0', archivo: 'edi-cabecera.png', ancho: 566, alto: 62 },
+  { cid: 'banner-edi-pie', alt: 'Consultas: servicioalclienteec@santillana.com o 1 800 212 000', archivo: 'edi-pie.png', ancho: 566, alto: 63 },
 ];
 
-// El "slug" es el nombre corto por el que se pide el logo en la URL
-// (?logo=santillana), derivado del cid quitándole el prefijo "logo-".
+// El "slug" es el nombre corto por el que se pide la imagen en la URL
+// (?logo=santillana), derivado del cid quitándole su prefijo. Se quitan los DOS
+// prefijos que se usan —"logo-" y "banner-"— para que la URL sea igual de corta
+// en ambos casos: ?logo=edi-cabecera, no ?logo=banner-edi-cabecera.
 export function slugLogo(cid) {
-  return cid.replace(/^logo-/, '');
+  return cid.replace(/^(logo|banner)-/, '');
 }
 
 /** Busca un logo por su slug (?logo=santillana). null si no existe. */
@@ -226,11 +231,9 @@ export function bannerPieHtml() {
  * correo.
  */
 export function firmaHtml() {
-  const logoPrincipal = imagen('logo-santillana');
-  const sello = imagen('logo-gptw');
+  // Si el bloque combinado no está, se cae al logo suelto de Santillana.
+  const cabecera = imagen('logo-santillana-gptw') || imagen('logo-santillana');
   const marcas = ['logo-compartir', 'logo-richmond', 'logo-creo', 'logo-loqueleo'].map(imagen).filter(Boolean);
-
-  const cabecera = [logoPrincipal, sello].filter(Boolean).join('&nbsp;&nbsp;');
 
   return (
     `<div style="${TIPOGRAFIA_CORREO}">` +

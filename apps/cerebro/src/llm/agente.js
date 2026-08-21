@@ -279,6 +279,15 @@ que es lo único para lo que sirve: desempatar entre colegios. Pedirlo por adela
 mundo alarga cada conversación para resolver unos pocos casos. Si el usuario lo da por su cuenta,
 úsalo.
 
+## 0b. SI AÚN NO HAY CONSENTIMIENTO DE DATOS
+Cuando recibas el aviso del sistema de que el usuario NO ha otorgado todavía el consentimiento, esa
+regla manda sobre TODO lo que sigue, incluida la del punto 1 de no llamar a la herramienta sin datos
+completos. En ese caso no pidas nada: llama de una vez a la herramienta que corresponda, con
+"pendiente" en los campos obligatorios que no tengas. El sistema no la ejecutará; enviará el
+formulario de consentimiento, que ya pide el nombre del estudiante, la institución, el grado y el
+paralelo. Pedirlos tú sería recoger datos de un menor sin permiso y además obligar al usuario a
+escribirlos dos veces.
+
 ## 1. Obtener credenciales de un estudiante
 Datos necesarios ANTES de buscar: los del punto 0.
 - REGLA CENTRAL: si falta alguno, NO llames todavía a buscar_credenciales. Tu respuesta debe pedir
@@ -1136,6 +1145,32 @@ export async function procesarCorreo({
     });
   }
 
+  // Sin consentimiento todavía: el modelo NO debe ponerse a pedir datos del
+  // estudiante por su cuenta.
+  //
+  // Pedir el nombre de un menor ya es recoger un dato personal, y además duplica
+  // el trabajo: el formulario de consentimiento pide exactamente esos campos.
+  // Sin este aviso, el asistente contestaba "envíeme nombre, nivel y paralelo"
+  // y el consentimiento no se pedía nunca, porque no llegaba a llamar a ninguna
+  // herramienta.
+  if (exigeConsentimiento) {
+    contents.push({
+      role: 'user',
+      parts: [{
+        text:
+          'AVISO DEL SISTEMA: este usuario todavía NO ha otorgado el consentimiento de tratamiento ' +
+          'de datos, así que NO puedes pedirle ningún dato de un estudiante.\n' +
+          '- Si su solicitud tiene que ver con un ESTUDIANTE (credenciales, reseteo de contraseña o ' +
+          'incidencia de la plataforma), llama YA a la herramienta que corresponda aunque te falten ' +
+          'datos: pon "pendiente" en los campos obligatorios que no tengas. El sistema interceptará ' +
+          'la llamada y le enviará el formulario de consentimiento, que ya le pide el nombre del ' +
+          'estudiante, la unidad educativa, el grado y el paralelo. NO se los pidas tú.\n' +
+          '- Si la consulta NO tiene relación con Santillana, llama a fuera_de_alcance.\n' +
+          '- Si pregunta por el PIN, usa info_pin con normalidad.',
+      }],
+    });
+  }
+
   // El correo llegó recortado: se avisa al modelo para que no confunda "dato
   // ausente" con "dato cortado" y vuelva a pedir lo que el usuario ya escribió.
   // Queda además registrado para que el problema sea visible en la analítica.
@@ -1284,8 +1319,19 @@ export async function procesarCorreo({
   // El correo SÍ requería tratar datos personales y el remitente aún no ha
   // consentido: ahora —y solo ahora— se le envía la política. Se descarta lo
   // que el modelo hubiera redactado: la respuesta correcta es el formulario.
-  if (contexto.faltaConsentimiento) {
-    await registrarEvento(hiloId, { tipo: 'politica_enviada', detalle: {} });
+  //
+  // La segunda condición es la GARANTÍA DURA: si el remitente no ha consentido y
+  // el modelo respondió sin llamar a ninguna herramienta, está pidiéndole datos
+  // por su cuenta — justo lo que no debe hacer. El prompt se lo prohíbe, pero un
+  // prompt no es una garantía, y aquí lo que está en juego es recoger datos de
+  // un menor sin permiso. Se descarta su texto y se envía el formulario.
+  const modeloPidioDatosSinPermiso = exigeConsentimiento && !contexto.huboTools;
+
+  if (contexto.faltaConsentimiento || modeloPidioDatosSinPermiso) {
+    await registrarEvento(hiloId, {
+      tipo: 'politica_enviada',
+      detalle: modeloPidioDatosSinPermiso ? { porGuarda: 'modelo_pidio_datos_sin_consentimiento' } : {},
+    });
     const texto = textoPolitica({ hiloId });
     await actualizarEstado(hiloId, 'esperando_consentimiento');
     await registrarMensaje(hiloId, { rol: 'asistente', cuerpo: texto });
