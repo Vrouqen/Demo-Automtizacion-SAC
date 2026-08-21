@@ -850,6 +850,33 @@ export function redactarRespuestaDeterminista(nombre, resultado) {
 }
 
 /**
+ * Resume, para el modelo, los datos que el representante YA entregó en el
+ * formulario de consentimiento. Sin esto el asistente volvía a pedir colegio,
+ * ciudad, grado y paralelo justo después de que el usuario los escribiera.
+ */
+function datosYaEntregados(registro) {
+  if (!registro) return '';
+
+  const s = registro.solicitud || {};
+  const filas = [
+    ['Nombre completo del estudiante', [registro.representado?.nombres, registro.representado?.apellidos].filter(Boolean).join(' ')],
+    ['Unidad educativa', s.institucion],
+    ['Ciudad', s.ciudad],
+    ['Provincia', s.provincia],
+    ['Nivel/Grado', s.grado],
+    ['Paralelo', s.paralelo],
+  ].filter(([, valor]) => valor);
+
+  if (filas.length === 0) return '';
+
+  return (
+    ' El usuario YA entregó estos datos; úsalos tal cual y NO los vuelvas a pedir:' +
+    filas.map(([etiqueta, valor]) => `\n- ${etiqueta}: ${valor}`).join('') +
+    '\nSi con ellos puedes resolver la solicitud, hazlo directamente.'
+  );
+}
+
+/**
  * Procesa un correo entrante con Gemini + function calling.
  * Como Lambda es stateless, el historial de la conversación se reconstruye
  * desde Mongo (colección conversaciones) en cada invocación, en vez de
@@ -971,6 +998,10 @@ export async function procesarCorreo({
   // qué relación y para qué finalidad. Hasta tenerlo completo no se atiende la
   // solicitud. Un job programado delega a un agente si no responde en el plazo.
   let consentimientoRecienAceptado = false;
+  // Datos que el representante entregó junto con el consentimiento. Se pasan al
+  // modelo para que NO se los vuelva a pedir: el correo de política ya los pide
+  // todos, y repreguntarlos es el error que más hace abandonar un caso.
+  let datosDelConsentimiento = null;
   if (config.consentimiento.habilitado && !esCorreoInterno(remitente)) {
     const yaAcepto = await yaConsintio({ conversacion, remitente });
     if (!yaAcepto) {
@@ -989,6 +1020,7 @@ export async function procesarCorreo({
           detalle: { registroId: respuesta.registro._id, parentesco: respuesta.registro.parentesco },
         });
         consentimientoRecienAceptado = true;
+        datosDelConsentimiento = respuesta.registro;
       } else {
         // Los tres caminos restantes contestan y dejan el hilo a la espera:
         // negativa registrada, datos incompletos, o primer envío de la política.
@@ -1009,7 +1041,7 @@ export async function procesarCorreo({
           texto = respuesta.texto;
         } else {
           await registrarEvento(hiloId, { tipo: 'politica_enviada', detalle: {} });
-          texto = textoPolitica();
+          texto = textoPolitica({ hiloId });
         }
 
         await actualizarEstado(hiloId, estadoFinal);
@@ -1053,9 +1085,10 @@ export async function procesarCorreo({
       role: 'user',
       parts: [{
         text:
-          'AVISO DEL SISTEMA: el usuario acaba de ACEPTAR la política de tratamiento de datos. No ' +
-          'vuelvas a mencionarla ni a pedirla. Atiende ahora su solicitud ORIGINAL, que está más ' +
-          'arriba en el historial de esta conversación (no el mensaje "ACEPTO").',
+          'AVISO DEL SISTEMA: el usuario acaba de OTORGAR el consentimiento de tratamiento de datos. ' +
+          'No vuelvas a mencionarlo ni a pedirlo. Atiende ahora su solicitud ORIGINAL, que está más ' +
+          'arriba en el historial de esta conversación (no el mensaje del consentimiento).' +
+          datosYaEntregados(datosDelConsentimiento),
       }],
     });
   }

@@ -244,8 +244,9 @@ El flujo es enteramente por correo: no hay página web ni el mensaje ejecuta nad
 
 1. El cliente escribe. El asistente responde con la **política** y deja el hilo en
    `esperando_consentimiento`. La solicitud no se atiende todavía.
-2. El representante responde con **«Sí»** y ocho campos. Cuando están completos y válidos se crea el
-   registro y se atiende la **solicitud original**, que sigue en el historial del hilo.
+2. El representante responde con **«Sí»** y el formulario de diez campos. Cuando están completos y
+   válidos se crea el registro y se atiende la **solicitud original**, sin volver a preguntar nada:
+   el mismo correo ya recogió colegio, ciudad, provincia, grado y paralelo.
 3. Si responde **a medias**, se le piden solo los campos que faltan, con el motivo concreto.
 4. Si **niega** el consentimiento, la negativa **queda registrada** (`¿Otorgado? = No`) y su solicitud
    pasa a un agente humano. No se le deja sin atención por no consentir.
@@ -259,8 +260,9 @@ El flujo es enteramente por correo: no hay página web ni el mensaje ejecuta nad
 | Fecha · Hora | Separadas, en hora de Ecuador (`America/Guayaquil`) |
 | Nombres · Apellidos · Cédula/ID **del representante legal** | |
 | Parentesco / Relación | |
-| Nombres · Apellidos · Cédula/ID **del estudiante** | |
-| Finalidad del consentimiento | Una sola, enunciada en el correo de política |
+| Nombres · Apellidos **del estudiante** | La cédula del estudiante ya no se pide |
+| Unidad Educativa · Ciudad · Provincia · Grado · Paralelo | Datos de la solicitud, en el mismo correo |
+| Finalidad del consentimiento | `Uso de IA para validar identidad` |
 | ¿Otorgado? | `Sí` / `No` — **la negativa también se registra** |
 
 Se guarda además el **texto literal** que escribió el representante, como prueba de lo que consintió.
@@ -280,7 +282,7 @@ un dato que ya dieron.
 
 **Los datos se acumulan a lo largo del hilo.** Es imprescindible: el correo que se les envía dice
 «responda indicando únicamente esos datos», así que su segunda respuesta trae solo lo que faltaba.
-Leyendo un mensaje suelto se perdía todo lo anterior y se volvían a pedir los ocho campos una y otra
+Leyendo un mensaje suelto se perdía todo lo anterior y se volvían a pedir todos los campos una y otra
 vez — un bucle del que el usuario no salía. Gana el valor más reciente que no venga vacío, de modo que
 corregir una cédula mal escrita no obligue a repetir el resto.
 
@@ -288,17 +290,25 @@ La firma corporativa que arrastran los correos no interfiere: para leer una lín
 exige que empiece por una etiqueta reconocible y que tanto la etiqueta como el valor sean cortos, así
 que las cláusulas de confidencialidad del pie no se confunden con datos.
 
-Las **cédulas ecuatorianas se validan con su dígito verificador** (módulo 10, más provincia y tipo de
-persona). Un error de tipeo se detecta y se pide corregirlo indicando exactamente cuál falla; sin esa
-comprobación el registro se llenaría de números inválidos y no probaría nada. Se aceptan también
+La **cédula del representante se valida con su dígito verificador** (módulo 10, más provincia y tipo
+de persona). Un error de tipeo se detecta y se pide corregirlo indicando exactamente cuál falla; sin
+esa comprobación el registro se llenaría de números inválidos y no probaría nada. Se aceptan también
 pasaporte y documento extranjero, marcados como no verificados, para no bloquear a representantes no
 ecuatorianos.
+
+**Ciudad y Provincia se piden pero no bloquean.** Mucha gente no sabe de memoria la provincia del
+colegio, y exigirlas reproduciría el bucle de preguntas que este flujo acaba de dejar atrás. Si las
+dan, se registran. Sí bloquean, en cambio, Unidad Educativa, Grado y Paralelo: sin ellos no se puede
+buscar la credencial.
+
+El correo cita una **referencia de incidencia** (`SSE-XXXXXX`) derivada del identificador del hilo,
+así que es estable para ese caso sin necesidad de un contador central.
 
 Una negativa explícita («no acepto») escrita en cualquier parte del correo manda sobre todo lo demás.
 
 ### Reporte
 
-`GET /?reporte=consentimientos` devuelve el registro con las once columnas en el orden exigido; con
+`GET /?reporte=consentimientos` devuelve el registro con las diez columnas en el orden exigido; con
 `&formato=csv` se descarga listo para archivar o entregar a auditoría. Admite `desde` y `hasta`. Va
 protegido por token: contiene datos personales de menores.
 
@@ -511,6 +521,8 @@ formato.
 | `CEREBRO_URL` / `FIRMA_LOGOS` | Logos de la firma corporativa |
 | `DASHBOARD_TOKEN` | Protección del dashboard |
 | `CONSENTIMIENTO_HABILITADO` / `_ALCANCE` / `_HORAS` / `_VIGENCIA_DIAS` | Política de datos |
+| `POLITICA_URL` | Enlace a la política de protección de datos que cita el correo |
+| `CORREO_DATOS` | Responsable de datos (por defecto `datosec@santillana.com`) |
 
 `MONGODB_URI`, `GEMINI_API_KEY`, `CREDENCIALES_ENC_KEY` y `AGENTES_DIGITALES` son **obligatorias**: sin
 ellas la función no arranca. Si `CUENTAS_SOPORTE` queda vacía, el sistema arranca pero **avisa**, porque

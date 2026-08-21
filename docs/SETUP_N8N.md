@@ -306,8 +306,9 @@ tengan las credenciales del Jira externo:
 
 Antes de atender la primera solicitud, el cerebro pide el **consentimiento de tratamiento de datos**
 (LOPDP), que **no es lo mismo que aceptar unos términos y condiciones**: el representante responde
-"Sí" más ocho campos (sus nombres, apellidos y cédula, el parentesco, y los del estudiante), y con eso
-se crea un **registro individual** auditable.
+"Sí" más un formulario de diez campos (sus nombres, apellidos y cédula, el parentesco, los nombres y
+apellidos del estudiante, y los datos del colegio), y con eso se crea un **registro individual**
+auditable y se atiende la solicitud sin más preguntas.
 
 Esto NO necesita nada nuevo en el workflow principal — el cerebro lo maneja solo: envía la política,
 interpreta la respuesta, pide lo que falte, registra el consentimiento (o la negativa) y luego atiende
@@ -326,7 +327,7 @@ política y los plazos se editan en el cerebro (`services/consentimiento.js` y l
 `CONSENTIMIENTO_*`); si quieres desactivar toda la verificación, `CONSENTIMIENTO_HABILITADO=false`.
 
 El registro para auditoría se descarga con
-`GET {URL-CEREBRO}/?reporte=consentimientos&formato=csv&token=...`, con las once columnas exigidas.
+`GET {URL-CEREBRO}/?reporte=consentimientos&formato=csv&token=...`, con las diez columnas exigidas.
 
 ## 6c. Cola de correos sin cuota de IA (reintento cada 15 min)
 

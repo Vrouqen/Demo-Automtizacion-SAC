@@ -88,6 +88,12 @@ export const config = {
     horasLimite: Number(process.env.CONSENTIMIENTO_HORAS || 48),
     // Solo aplica al alcance 'cliente': cuánto vale una aceptación (días).
     vigenciaDias: Number(process.env.CONSENTIMIENTO_VIGENCIA_DIAS || 365),
+    // Enlace a la política de protección de datos que cita el correo. Si queda
+    // vacío NO se escribe un enlace roto: el texto remite al correo de datos.
+    politicaUrl: (process.env.POLITICA_URL || '').trim(),
+    // Responsable de protección de datos: a donde se ejercen los derechos y se
+    // retira el consentimiento. Es distinto del buzón de soporte.
+    correoDatos: (process.env.CORREO_DATOS || 'datosec@santillana.com').trim(),
   },
   jira: {
     habilitado: process.env.JIRA_HABILITADO === 'true',

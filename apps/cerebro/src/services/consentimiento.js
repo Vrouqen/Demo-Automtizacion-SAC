@@ -28,8 +28,7 @@ import { crearEscalamiento } from './escalamientos.js';
  * enumera en el correo de política, de modo que el "Sí" sea informado: el
  * representante ve los tres tratamientos concretos que cubre antes de aceptar.
  */
-export const FINALIDAD =
-  'ATENCIÓN DE SOPORTE CON USO DE IA PARA VALIDAR IDENTIDAD Y ENTREGAR CREDENCIALES';
+export const FINALIDAD = 'Uso de IA para validar identidad';
 
 /** Zona horaria del registro: el piloto opera en Ecuador. */
 const ZONA = 'America/Guayaquil';
@@ -88,6 +87,14 @@ function campoDe(etiqueta) {
   if (/(parentesco|relacion|vinculo)/.test(e)) return 'parentesco';
   if (/(autoriz|consent|otorg|acept)/.test(e)) return 'otorgado';
 
+  // Datos de la solicitud. Se piden en el MISMO correo que el consentimiento
+  // para no encadenar dos rondas de preguntas al representante.
+  if (/(unidad educativa|instituci|colegio|escuela|plantel)/.test(e)) return 'solicitud.institucion';
+  if (/provincia/.test(e)) return 'solicitud.provincia';
+  if (/ciudad/.test(e)) return 'solicitud.ciudad';
+  if (/(paralelo|grupo|secci)/.test(e)) return 'solicitud.paralelo';
+  if (/(grado|nivel|curso)/.test(e)) return 'solicitud.grado';
+
   // "del estudiante" manda sobre "del representante": una etiqueta como
   // "Nombres del estudiante" contiene ambas ideas solo si se lee mal.
   const grupo = /(estudiante|representad|alumn|hij[oa]|menor)/.test(e) ? 'representado' : 'representante';
@@ -145,6 +152,7 @@ export function parsearConsentimiento(texto) {
     representante: { nombres: '', apellidos: '', cedula: '' },
     representado: { nombres: '', apellidos: '', cedula: '' },
     parentesco: '',
+    solicitud: { institucion: '', ciudad: '', provincia: '', grado: '', paralelo: '' },
     textoOriginal: String(texto || '').trim().slice(0, 4000),
   };
 
@@ -229,6 +237,7 @@ export function acumularConsentimiento(textos) {
     representante: { nombres: '', apellidos: '', cedula: '' },
     representado: { nombres: '', apellidos: '', cedula: '' },
     parentesco: '',
+    solicitud: { institucion: '', ciudad: '', provincia: '', grado: '', paralelo: '' },
     textoOriginal: '',
   };
 
@@ -241,6 +250,9 @@ export function acumularConsentimiento(textos) {
       for (const campo of ['nombres', 'apellidos', 'cedula']) {
         if (datos[grupo][campo]) total[grupo][campo] = datos[grupo][campo];
       }
+    }
+    for (const campo of Object.keys(total.solicitud)) {
+      if (datos.solicitud[campo]) total.solicitud[campo] = datos.solicitud[campo];
     }
     if (datos.textoOriginal) partes.push(datos.textoOriginal);
   }
@@ -257,19 +269,26 @@ export function acumularConsentimiento(textos) {
 export function validarConsentimiento(datos) {
   const faltan = [];
 
-  if (datos.otorgado !== true) faltan.push('La palabra "Sí" para otorgar el consentimiento');
-  if (!datos.representante.nombres) faltan.push('Nombres del representante legal');
-  if (!datos.representante.apellidos) faltan.push('Apellidos del representante legal');
+  if (datos.otorgado !== true) faltan.push('La palabra "Sí" para autorizar');
 
+  if (!datos.representante.nombres || !datos.representante.apellidos) {
+    faltan.push('Nombre y Apellido Representante Legal');
+  }
   const docRep = validarDocumento(datos.representante.cedula);
-  if (docRep.error) faltan.push(`Cédula/ID del representante legal (${docRep.error})`);
+  if (docRep.error) faltan.push(`Cédula Representante Legal (${docRep.error})`);
 
-  if (!datos.parentesco) faltan.push('Parentesco o relación con el estudiante');
-  if (!datos.representado.nombres) faltan.push('Nombres del estudiante');
-  if (!datos.representado.apellidos) faltan.push('Apellidos del estudiante');
+  if (!datos.representado.nombres || !datos.representado.apellidos) {
+    faltan.push('Nombre y Apellidos del estudiante');
+  }
+  if (!datos.parentesco) faltan.push('Parentesco');
 
-  const docEst = validarDocumento(datos.representado.cedula);
-  if (docEst.error) faltan.push(`Cédula/ID del estudiante (${docEst.error})`);
+  // Datos necesarios para localizar las credenciales. Ciudad y Provincia se
+  // piden en el correo pero NO bloquean: mucha gente no sabe de memoria el
+  // cantón o la provincia del colegio, y exigirlos reproduciría el bucle de
+  // preguntas que el flujo acaba de dejar atrás. Si los dan, se registran.
+  if (!datos.solicitud.institucion) faltan.push('Unidad Educativa');
+  if (!datos.solicitud.grado) faltan.push('Grado');
+  if (!datos.solicitud.paralelo) faltan.push('Paralelo');
 
   return faltan;
 }
@@ -278,48 +297,78 @@ export function validarConsentimiento(datos) {
 
 const CORREO_SOPORTE = (config.cuentasSoporte && config.cuentasSoporte[0]) || 'soporteecuador@santillana.com';
 
+/** Responsable de protección de datos: es a donde se ejercen los derechos. */
+const CORREO_DATOS = config.consentimiento.correoDatos;
+
 const CAMPOS_PEDIDOS =
-  '- Autorizo: **Sí**\n' +
-  '- Nombres del representante legal:\n' +
-  '- Apellidos del representante legal:\n' +
-  '- Cédula/ID del representante legal:\n' +
-  '- Parentesco con el estudiante:\n' +
-  '- Nombres del estudiante:\n' +
-  '- Apellidos del estudiante:\n' +
-  '- Cédula/ID del estudiante:';
+  'Autoriza:\n' +
+  'Nombre y Apellido Representante Legal:\n' +
+  'Cédula Representante Legal:\n' +
+  'Nombre y Apellidos del estudiante:\n' +
+  'Parentesco:\n' +
+  'Unidad Educativa:\n' +
+  'Ciudad:\n' +
+  'Provincia:\n' +
+  'Grado:\n' +
+  'Paralelo:';
 
 /**
- * Correo de política. Enumera los tres tratamientos concretos que cubre el
- * consentimiento, para que el "Sí" sea informado y no una casilla a ciegas.
+ * Referencia de la incidencia que se cita en el correo.
+ *
+ * Se deriva del identificador del hilo, así que es ESTABLE: el mismo hilo
+ * produce siempre la misma referencia sin necesidad de guardarla ni de un
+ * contador central. Es un número para que el representante y el agente hablen
+ * del mismo caso, no una clave.
  */
-export function textoPolitica() {
-  const horas = config.consentimiento.horasLimite;
+export function referenciaSoporte(hiloId) {
+  let h = 0;
+  for (const c of String(hiloId || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `SSE-${String(h % 1000000).padStart(6, '0')}`;
+}
+
+/**
+ * Correo de política. El texto legal lo proporciona Santillana; aquí solo se
+ * interpolan la referencia de la incidencia y el enlace a la política, y se
+ * marcan en negrita las partes que el cliente indicó.
+ */
+export function textoPolitica({ hiloId } = {}) {
+  const enlace = config.consentimiento.politicaUrl;
+  // Sin URL configurada no se escribe un enlace roto: se remite al correo del
+  // responsable de datos, que siempre existe.
+  const dondeConsultar = enlace
+    ? `en el siguiente enlace: ${enlace}`
+    : `escribiendo a ${CORREO_DATOS}`;
+
   return (
-    'Hola, gracias por escribirnos.\n\n' +
-    'Antes de gestionar su solicitud necesitamos **su consentimiento para tratar sus datos personales ' +
-    'y los del estudiante**, conforme a la Ley Orgánica de Protección de Datos Personales del Ecuador ' +
-    '(LOPDP). **Este consentimiento es independiente de cualquier término y condición que haya ' +
-    'aceptado antes.**\n\n' +
-    `**FINALIDAD**\n${FINALIDAD}\n\n` +
-    '**QUÉ TRATAMIENTOS CUBRE**\n' +
-    '1. **Uso de un servicio de inteligencia artificial de un tercero (Google)** para leer su correo, ' +
-    'validar la identidad del estudiante y preparar la respuesta.\n' +
-    '2. **Tratamiento de los datos del estudiante (menor de edad)** para localizar y entregarle sus ' +
-    'credenciales de acceso a las plataformas educativas.\n' +
-    '3. **Almacenamiento y procesamiento en servidores ubicados fuera del Ecuador**, con las ' +
-    'garantías contractuales correspondientes.\n\n' +
-    '**SUS DERECHOS**\n' +
-    'Puede ejercer sus derechos de **acceso, rectificación y eliminación**, y **retirar este ' +
-    'consentimiento en cualquier momento**, escribiendo a ' +
-    `${CORREO_SOPORTE}. No compartimos sus datos con terceros ajenos a la prestación del servicio y ` +
-    'los conservamos solo el tiempo necesario para atenderle.\n\n' +
-    '**PARA CONTINUAR**\n' +
-    'Responda a este mismo correo **copiando la siguiente lista y completándola**:\n\n' +
+    'Estimado/a,\n\n' +
+    'Le saludamos de Soporte Santillana Ecuador, su requerimiento está siendo atendido en la ' +
+    `incidencia **${referenciaSoporte(hiloId)}**.
+
+` +
+    '"Sistemas Educativos de Enseñanza S.A.S. en su calidad de responsable del tratamiento en ' +
+    'cumplimiento de la LOPD cumple con informarle que utilizará los datos personales de los ' +
+    'usuarios representantes para atender las solicitudes de recuperación de credenciales y para la ' +
+    'gestión de incidencias en la plataforma.\n' +
+    'Asimismo, con base en su consentimiento, Sistemas Educativos de Enseñanza S.A.S utilizará los ' +
+    'datos personales de sus representados (hijo/hija menor de edad) para emplear sistemas de ' +
+    'inteligencia artificial que permitan validar la identidad del solicitante y gestionar su ' +
+    'solicitud de recuperación de credenciales.\n' +
+    'Puedes consultar toda la información relacionada con el tratamiento de tus datos personales o ' +
+    `sobre cómo ejercer tus derechos ${dondeConsultar}."
+
+` +
+    '**¿Consiente el uso de los datos personales de su representado, mediante herramientas de ' +
+    'inteligencia artificial, para validar su identidad y confirmar el vínculo entre ustedes?**\n' +
+    "Si está de acuerdo, responda **'Sí'** al presente correo electrónico, con los siguientes datos " +
+    'para brindar solución a su requerimiento\n\n' +
     CAMPOS_PEDIDOS +
-    '\n\nSi no desea otorgar el consentimiento, responda **"No acepto"** y su solicitud será atendida ' +
-    'igualmente por un agente de nuestro equipo.\n\n' +
-    `Si no recibimos su respuesta dentro de las próximas **${horas} horas**, su caso será atendido ` +
-    'por un agente, que le responderá en un plazo de **48 a 52 horas**.'
+    '\n\n**Autorizar la validación automatizada de la identidad de tu representado nos permite ' +
+    'resolver tu solicitud en menor tiempo. Si prefieres no hacerlo, tu solicitud será igualmente ' +
+    'atendida mediante un proceso de verificación manual, cuyo tiempo de respuesta puede superar ' +
+    'las 72 horas.**\n\n' +
+    'Puedes ejercer alguno de tus derechos en datos personales o retirar tu consentimiento en ' +
+    'cualquier momento siguiendo las instrucciones de la política de protección de datos personales ' +
+    `en el correo ${CORREO_DATOS}`
   );
 }
 
@@ -383,9 +432,14 @@ export async function registrarConsentimiento({ datos, remitente, hiloId, mensaj
     representado: {
       nombres: datos.representado.nombres,
       apellidos: datos.representado.apellidos,
+      // El registro ya no exige la cédula del representado; se guarda solo si
+      // el representante la aportó por su cuenta.
       cedula: validarDocumento(datos.representado.cedula).valor || '',
     },
     parentesco: datos.parentesco,
+    // Datos del colegio recogidos en el mismo correo. No forman parte del
+    // registro legal, pero evitan volver a preguntárselos para la búsqueda.
+    solicitud: datos.solicitud,
     finalidad: FINALIDAD,
     otorgado: datos.otorgado === true,
     // Vigencia solo para el alcance 'cliente'; en alcance 'correo' cada hilo
@@ -472,14 +526,13 @@ export async function procesarRespuestaConsentimiento({ conversacion, hiloId, me
 export const COLUMNAS_REPORTE = [
   'Fecha',
   'Hora',
-  'Nombres (representante legal)',
-  'Apellidos (representante legal)',
-  'Cédula/ID (representante legal)',
-  'Nombres (representado)',
-  'Apellidos (representado)',
-  'Cédula/ID (representado)',
-  'Parentesco/Relación',
-  'Finalidad del consentimiento',
+  'Nombre (Representante legal)',
+  'Apellido (Representante legal)',
+  'Cédula (Representante legal)',
+  'Nombres (Representado)',
+  'Apellidos (Representado)',
+  'Parentesco',
+  'Finalidad del Consentimiento',
   '¿Otorgado?',
 ];
 
@@ -492,7 +545,6 @@ function fila(r) {
     r.representante?.cedula || '',
     r.representado?.nombres || '',
     r.representado?.apellidos || '',
-    r.representado?.cedula || '',
     r.parentesco || '',
     r.finalidad || '',
     r.otorgado ? 'Sí' : 'No',
