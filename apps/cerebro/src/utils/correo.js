@@ -178,11 +178,27 @@ export function textoAHtml(texto, { firma = true } = {}) {
   // arriba, cuerpo, banner de contacto + confidencialidad, y firma. Los correos
   // INTERNOS (delegación a un agente, aviso de ticket) van sin nada de eso:
   // son de trabajo, no comerciales, y el banner solo estorbaría.
-  return (
+  const contenido =
     (firma ? bannerCabeceraHtml() : '') +
     `<div style="${TIPOGRAFIA_CORREO}">` +
     parrafos.join('') +
     `</div>` +
-    (firma ? bannerPieHtml() + firmaHtml() : '')
+    (firma ? bannerPieHtml() + firmaHtml() : '');
+
+  // Los correos internos van sueltos: no llevan banner, así que no hay nada con
+  // lo que alinearlos y una anchura fija solo estorbaría al leerlos.
+  if (!firma) return contenido;
+
+  // Contenedor a ANCHO COMPLETO. No se fija ninguna anchura en píxeles: el
+  // correo ocupa el panel de lectura entero y los banners, que son fluidos, lo
+  // acompañan. Así, al ampliar el zoom o estrechar la ventana, la imagen se
+  // reajusta sola en vez de quedarse clavada a un tamaño.
+  //
+  // Va en TABLA y no en un div porque Outlook de escritorio usa el motor de
+  // Word, que trata los div sueltos de forma poco predecible dentro del cuerpo.
+  return (
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ' +
+    'style="width:100%;border-collapse:collapse;">' +
+    `<tr><td style="padding:0;">${contenido}</td></tr></table>`
   );
 }

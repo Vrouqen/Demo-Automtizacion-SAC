@@ -138,11 +138,16 @@ export const LOGOS = [
   // tal como viene del archivo original (204x64). Sustituye a logo-santillana en
   // la firma; ese sigue disponible por separado para otros usos.
   { cid: 'logo-santillana-gptw', alt: 'Santillana · Great Place To Work Certified', archivo: 'santillana-gptw.png', ancho: 200, alto: 63 },
-  // Banners de EDI, a su tamaño NATURAL (566 px de ancho). No se escalan: al
-  // ampliarlos se verían borrosos y al reducirlos se perdería legibilidad del
-  // texto y del QR, que es lo único que hay que poder leer en el pie.
-  { cid: 'banner-edi-cabecera', alt: 'EDI · Ecosistema Digital Integrado 2.0', archivo: 'edi-cabecera.png', ancho: 566, alto: 62 },
-  { cid: 'banner-edi-pie', alt: 'Consultas: servicioalclienteec@santillana.com o 1 800 212 000', archivo: 'edi-pie.png', ancho: 566, alto: 63 },
+  // Banners de EDI. `bloque: true` los hace FLUIDOS: ocupan el 100 % del ancho
+  // disponible y calculan su alto solos, así que se reajustan al zoom y al ancho
+  // del panel. `ancho`/`alto` quedan solo como referencia del tamaño natural del
+  // archivo (885x98); el render no los usa.
+  //
+  // Que el archivo sea de 885 px y no de 566 es lo que los mantiene nítidos: con
+  // el de 566, que se mostraba a su tamaño exacto, el escalado de pantalla de
+  // Windows (125-150 %) lo ampliaba e interpolaba, y por eso se veía borroso.
+  { cid: 'banner-edi-cabecera', alt: 'EDI · Ecosistema Digital Integrado 2.0', archivo: 'banner-edi-grande.png', ancho: 885, alto: 98, bloque: true },
+  { cid: 'banner-edi-pie', alt: 'Consultas: servicioalclienteec@santillana.com o 1 800 212 000', archivo: 'banner-edi-pie-grande.png', ancho: 885, alto: 98, bloque: true },
 ];
 
 // El "slug" es el nombre corto por el que se pide la imagen en la URL
@@ -200,6 +205,22 @@ function imagen(nombre) {
   } else {
     return '';
   }
+  // Los BANNERS son fluidos: ocupan el 100 % del ancho disponible y calculan su
+  // alto solos. Es el "ajuste automático" de Outlook — al ampliar el correo o
+  // cambiar el ancho del panel, la imagen acompaña en vez de quedarse fija.
+  //
+  // Por eso no llevan atributo `height`: con el alto fijado y el ancho al 100 %,
+  // Outlook estira la imagen y la deforma. `width="100%"` va también como
+  // atributo porque los clientes que ignoran CSS solo miran ese.
+  if (l.bloque) {
+    return (
+      `<img src="${src}" alt="${l.alt}" width="100%" ` +
+      'style="border:0;display:block;width:100%;max-width:100%;height:auto;">'
+    );
+  }
+
+  // Los logos de la firma sí van a tamaño fijo: son pequeños y estirarlos solo
+  // los haría borrosos.
   return `<img src="${src}" alt="${l.alt}" width="${l.ancho}" height="${l.alto}" style="border:0;display:inline-block;vertical-align:middle;max-width:${l.ancho}px;">`;
 }
 

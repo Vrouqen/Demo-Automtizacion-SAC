@@ -59,15 +59,30 @@ ninguna etiqueta `<img>`: es preferible una firma sobria a una con cuadros rotos
 
 ## Piezas del diseño del correo al cliente
 
-| Archivo | Qué es | Original | Se muestra a | Dónde va |
-|---|---|---|---|---|
-| `edi-cabecera.png` | Banner EDI superior | 566×62 | 566×62 | Arriba del todo |
-| `edi-pie.png` | Banner EDI de contacto con QR | 566×63 | 566×63 | Bajo el cuerpo, antes de la confidencialidad |
-| `santillana-gptw.png` | Santillana + sello Great Place To Work | 204×64 | 200×63 | Cabecera de la firma |
+| Archivo | Qué es | Tamaño del archivo | Cómo se muestra |
+|---|---|---|---|
+| `banner-edi-grande.png` | Banner EDI superior | 885×98 | **Fluido**: 100 % del ancho |
+| `banner-edi-pie-grande.png` | Banner EDI de contacto con QR | 885×98 | **Fluido**: 100 % del ancho |
+| `santillana-gptw.png` | Santillana + sello Great Place To Work | 204×64 | Fijo, 200×63 |
 
-Los banners van a su **tamaño natural**: ampliarlos los vería borrosos y
-reducirlos haría ilegible el texto y el QR del pie, que es justo lo único que hay
-que poder leer ahí.
+Los banners son **fluidos**: ocupan todo el ancho disponible y calculan su alto
+solos (`width:100%; height:auto`, sin atributo `height`). Es el "ajuste
+automático" de Outlook — al ampliar el zoom o estrechar la ventana, la imagen
+acompaña en vez de quedarse clavada.
+
+Los logos de la firma NO son fluidos: son pequeños y estirarlos solo los haría
+borrosos.
+
+**El tamaño del archivo es lo que da nitidez.** Uno que se muestra a su tamaño
+exacto (1x) se ve borroso en Windows con escalado de pantalla al 125-150 %,
+porque el sistema lo amplía e interpola. Por eso los banners son de 885 px: al
+ser fluidos se muestran a lo que dé el panel, y con 885 px de origen aguantan sin
+verse blandos hasta paneles bastante anchos. Si en pantallas muy grandes se
+notaran, la solución es reexportarlos más grandes desde el diseño original —no
+hay que tocar código.
+
+Los banners de 566 px que hubo antes se eliminaron: se mostraban a 1x y eran
+justo el caso que se veía mal.
 
 `santillana-gptw.png` sustituye a `santillana.png` en la firma. El logo suelto se
 conserva y se sigue sirviendo por `?logo=santillana` para otros usos.
@@ -80,4 +95,7 @@ nunca sale un cuadro roto.
 
 **En esta carpeta** (`apps/cerebro/src/assets/firma/`), no en `assets/`. El código
 los lee de aquí y el endpoint los sirve en `{URL-CEREBRO}/?logo=<slug>`, donde el
-slug es el nombre del archivo sin extensión.
+slug es el nombre del archivo sin extensión ni el prefijo `banner-`/`logo-`.
+
+El correo no tiene anchura fija: ocupa el panel de lectura entero y los banners
+lo acompañan.

@@ -31,7 +31,7 @@ function destinatarioEquipo(equipo) {
  * escalamiento: el equipo que lo atiende NO ve el hilo del cliente, así que
  * todo lo necesario viaja aquí.
  */
-function armarCorreoTicket({ ticket, hiloId, asuntoOriginal, usuarioAfectado, institucion, plataforma }) {
+function armarCorreoTicket({ ticket, asuntoOriginal, usuarioAfectado, institucion, plataforma }) {
   const para = destinatarioEquipo(ticket.equipo);
   const tipoLegible = TIPOS[ticket.tipo] || ticket.tipo;
   const resumen = [usuarioAfectado, institucion].filter(Boolean).join(' — ').slice(0, 70);
@@ -43,8 +43,12 @@ function armarCorreoTicket({ ticket, hiloId, asuntoOriginal, usuarioAfectado, in
     `**QUÉ SE NECESITA**\n${ticket.descripcion}`,
     plataforma ? `**PLATAFORMA**\n${plataforma}` : null,
     ticket.enlazadoA ? `**TICKET RELACIONADO**\nEste ticket viene del mismo hilo que **${ticket.enlazadoA}**.` : null,
-    '**CÓMO RESPONDER**\nAtiende el ticket y **responde directamente al solicitante en su hilo de correo original**. Este aviso es informativo: responder a ESTE correo **no llega al cliente**.',
-    `Referencia interna del hilo: ${hiloId}`,
+    // Este texto decía justo lo contrario ("responder a ESTE correo no llega al
+    // cliente"). Quedó de antes de que los tickets tuvieran viaje de vuelta: hoy
+    // n8n registra el hilo de este aviso y la respuesta del equipo se reenvía
+    // sola al hilo original del cliente, igual que en un caso derivado. Quien lo
+    // leyera se ponía a buscar el correo del cliente para nada.
+    '**CÓMO RESPONDER**\nResponde a **ESTE mismo correo** con la solución. Tu respuesta se enviará **automáticamente al solicitante**, en el hilo donde él escribió, así que redáctala como si le hablaras directamente a él o ella. No hace falta que busques su correo ni que copies el código del ticket.',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -116,7 +120,6 @@ export async function crearTicket({
 
   const correoTicket = armarCorreoTicket({
     ticket,
-    hiloId,
     asuntoOriginal,
     usuarioAfectado,
     institucion,
