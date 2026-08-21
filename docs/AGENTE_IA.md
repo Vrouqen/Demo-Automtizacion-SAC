@@ -273,9 +273,20 @@ Ecuador.
 ### Cómo se interpreta la respuesta
 
 El parseo acepta lo que la gente escribe de verdad: campos en cualquier orden, con o sin guiones o
-numeración, con o sin tildes, nombres y apellidos juntos o separados, y el «Sí» en su propia línea o
-como valor de una etiqueta. Si escriben el nombre completo en el campo de nombres, se reparte solo, en
-vez de pedirles un dato que ya dieron.
+numeración, con o sin tildes, con o sin los dos puntos (`Cédula del estudiante 2300601594` funciona
+igual), nombres y apellidos juntos o separados, y el «Sí» en su propia línea o como valor de una
+etiqueta. Si escriben el nombre completo en el campo de nombres, se reparte solo, en vez de pedirles
+un dato que ya dieron.
+
+**Los datos se acumulan a lo largo del hilo.** Es imprescindible: el correo que se les envía dice
+«responda indicando únicamente esos datos», así que su segunda respuesta trae solo lo que faltaba.
+Leyendo un mensaje suelto se perdía todo lo anterior y se volvían a pedir los ocho campos una y otra
+vez — un bucle del que el usuario no salía. Gana el valor más reciente que no venga vacío, de modo que
+corregir una cédula mal escrita no obligue a repetir el resto.
+
+La firma corporativa que arrastran los correos no interfiere: para leer una línea sin dos puntos se
+exige que empiece por una etiqueta reconocible y que tanto la etiqueta como el valor sean cortos, así
+que las cláusulas de confidencialidad del pie no se confunden con datos.
 
 Las **cédulas ecuatorianas se validan con su dígito verificador** (módulo 10, más provincia y tipo de
 persona). Un error de tipeo se detecta y se pide corregirlo indicando exactamente cuál falla; sin esa

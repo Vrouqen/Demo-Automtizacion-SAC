@@ -665,9 +665,39 @@
     derivacion_bloqueada_falta_info: 'Derivación frenada (faltaban datos)', ticket_bloqueado_falta_info: 'Ticket frenado (faltaban datos)',
     promesa_sin_accion_corregida: 'Respuesta corregida antes de enviar', cerrado_por_inactividad: 'Cerrado por inactividad',
     escalamiento_fallido: 'Falló la creación del caso',
-    politica_enviada: 'Política de datos enviada', consentimiento_aceptado: 'Cliente aceptó la política',
+    politica_enviada: 'Política de datos enviada',
+    consentimiento_otorgado: 'Consentimiento otorgado', consentimiento_negado: 'Consentimiento NEGADO',
+    consentimiento_incompleto: 'Consentimiento incompleto (se pidieron los datos que faltaban)',
+    delegado_por_no_consentir: 'Delegado a agente (sin consentimiento en el plazo)',
+    // Nombres anteriores: los hilos guardados antes del cambio siguen usándolos.
+    consentimiento_aceptado: 'Cliente aceptó la política',
     delegado_por_no_aceptar_politica: 'Delegado a agente (no aceptó la política)',
+    // Resultados de la búsqueda de credenciales (credencial_<estado>).
+    credencial_homonimos: 'Varios colegios con el mismo nombre',
+    credencial_colegio_no_encontrado: 'Colegio no encontrado',
+    credencial_estudiante_no_encontrado: 'Estudiante no encontrado',
+    credencial_candidatos: 'Varias coincidencias parciales de estudiante',
+    credencial_sin_colegios: 'No hay colegios cargados',
+    consulta_estudiantes_activos: 'Consulta de estudiantes activos',
+    // Cola por falta de cuota de IA.
+    error_llm_cuota: 'Sin cuota de IA (correo encolado)', error_llm: 'Error del servicio de IA',
+    error_llm_sin_texto: 'La IA no devolvió respuesta',
+    reprocesado_desde_cola: 'Reprocesado desde la cola',
+    delegado_por_espera_en_cola: 'Delegado a agente (esperó demasiado en la cola)',
+    // Invariantes que abortaron el envío.
+    ticket_sin_destinatario: 'Ticket sin equipo asignado', escalamiento_sin_destinatario: 'Caso sin agente asignado',
   };
+
+  /**
+   * Nombre legible de un evento. Si aparece uno que no está en la tabla —cada
+   * función nueva suele traer los suyos— se muestra presentable en vez de en
+   * crudo: "credencial_estudiante_no_encontrado" se leía fatal en el hilo.
+   */
+  function nombreEvento(tipo) {
+    if (NOMBRE_EVENTO[tipo]) return NOMBRE_EVENTO[tipo];
+    const texto = String(tipo || '').replace(/_/g, ' ').trim();
+    return texto ? texto[0].toUpperCase() + texto.slice(1) : '(evento sin tipo)';
+  }
 
   async function abrirDetalle(id) {
     modalFondo.hidden = false;
@@ -733,7 +763,7 @@
       html += '<h4>Eventos</h4>';
       html += d.eventos.map((e) =>
         '<div class="evento"><span class="et">' + fechaCorta(e.fecha) + '</span>' +
-        '<span class="ev">' + esc(NOMBRE_EVENTO[e.tipo] || e.tipo) + '</span></div>'
+        '<span class="ev">' + esc(nombreEvento(e.tipo)) + '</span></div>'
       ).join('');
     }
 

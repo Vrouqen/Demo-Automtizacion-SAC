@@ -91,6 +91,8 @@
   input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   select:disabled { opacity: .5; cursor: not-allowed; }
   input.autollenado { border-color: var(--info); background: var(--info-soft); }
+  /* Campo obligatorio que quedó vacío: se marca hasta que el usuario lo llene. */
+  input.falta, select.falta { border-color: var(--err); box-shadow: 0 0 0 3px var(--err-soft); }
 
   .platform-toggle { display: flex; gap: 10px; flex-wrap: wrap; }
   .platform-toggle label {
@@ -192,6 +194,12 @@
   .col-filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
   .col-filtros input[type="search"] { flex: 1 1 240px; min-width: 160px; }
   .col-filtros select { flex: 0 0 auto; width: auto; }
+  .col-filtros button {
+    flex: 0 0 auto; font: inherit; font-size: 13px; padding: 9px 13px; border-radius: 8px;
+    cursor: pointer; border: 1px solid var(--border); background: var(--bg); color: var(--text-muted);
+  }
+  .col-filtros button:hover { border-color: var(--accent); color: var(--text); }
+  .col-filtros button[hidden] { display: none; }
   .paginacion {
     display: flex; gap: 10px; align-items: center; justify-content: flex-end;
     flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--text-muted);
@@ -382,6 +390,7 @@
         <option value="50">50 / pág.</option>
         <option value="100">100 / pág.</option>
       </select>
+      <button type="button" id="col-limpiar" hidden>Limpiar filtros</button>
     </div>
     <div id="lista-colegios" style="margin-top:14px"><p class="empty-state">Cargando…</p></div>
     <div class="paginacion" id="col-paginacion"></div>
@@ -845,7 +854,15 @@
   var listaEl = $('lista-colegios');
   var paginacionEl = $('col-paginacion');
   var btnRefrescar = $('btn-refrescar');
-  var colFiltro = { q: '', limite: 10, pagina: 1 };
+  var btnLimpiar = $('col-limpiar');
+  var LIMITE_POR_DEFECTO = 10;
+  var colFiltro = { q: '', limite: LIMITE_POR_DEFECTO, pagina: 1 };
+
+  // El botón de limpiar solo aparece cuando hay algo que limpiar: si estuviera
+  // siempre visible, sería un botón muerto la mayor parte del tiempo.
+  function hayFiltros() {
+    return Boolean(colFiltro.q.trim()) || colFiltro.limite !== LIMITE_POR_DEFECTO;
+  }
 
   function resaltarTexto(valor, q) {
     var s = escapeHtml(valor);
@@ -864,6 +881,9 @@
   }
 
   function renderColegios() {
+    // Antes de cualquier salida temprana: si no, al filtrar hasta dejar la tabla
+    // vacía el botón se quedaría oculto justo cuando más falta hace.
+    btnLimpiar.hidden = !hayFiltros();
     if (colegios.length === 0) {
       listaEl.innerHTML = '<p class="empty-state">Todavía no hay colegios cargados.</p>';
       paginacionEl.innerHTML = '';
@@ -941,7 +961,17 @@
     debounceCol = setTimeout(function () { colFiltro.q = v; colFiltro.pagina = 1; renderColegios(); }, 250);
   });
   $('col-limite').addEventListener('change', function (e) {
-    colFiltro.limite = Number(e.target.value) || 10; colFiltro.pagina = 1; renderColegios();
+    colFiltro.limite = Number(e.target.value) || LIMITE_POR_DEFECTO; colFiltro.pagina = 1; renderColegios();
+  });
+  btnLimpiar.addEventListener('click', function () {
+    // Hay que matar el debounce pendiente: si no, 250 ms después volvería a
+    // aplicar el texto que acabamos de borrar.
+    clearTimeout(debounceCol);
+    $('col-q').value = '';
+    $('col-limite').value = String(LIMITE_POR_DEFECTO);
+    colFiltro.q = ''; colFiltro.limite = LIMITE_POR_DEFECTO; colFiltro.pagina = 1;
+    renderColegios();
+    $('col-q').focus();
   });
 
   // ── Carga individual (modal) ────────────────────────────────────────────
@@ -966,13 +996,46 @@
       periodo: $('periodo').value,
     };
   }
+  // Datos del colegio que un usuario suelto necesita. Son los mismos que el
+  // formulario de Excel marca como required: la ubicación entraba sin validar y
+  // el registro terminaba guardado con región/ciudad/cantón en "n/a", sin que
+  // nada avisara. 'id' es el campo al que hay que llevar al usuario (la
+  // plataforma no lo tiene: siempre viene una marcada).
+  var CAMPOS_CONTEXTO = [
+    { clave: 'nombreColegio', id: 'nombreColegio', etiqueta: 'nombre del colegio' },
+    { clave: 'codigoColegio', id: 'codigoColegio', etiqueta: 'código del colegio' },
+    { clave: 'region',        id: 'region',        etiqueta: 'región' },
+    { clave: 'ciudad',        id: 'provincia',     etiqueta: 'ciudad (provincia)' },
+    { clave: 'canton',        id: 'canton',        etiqueta: 'cantón' },
+    { clave: 'plataforma',    id: null,            etiqueta: 'plataforma' },
+    { clave: 'periodo',       id: 'periodo',       etiqueta: 'periodo' },
+  ];
+
   function faltantesContexto(ctx) {
-    var faltan = [];
-    if (!ctx.nombreColegio) faltan.push('nombre del colegio');
-    if (!ctx.codigoColegio) faltan.push('código del colegio');
-    if (!ctx.plataforma) faltan.push('plataforma');
-    if (!ctx.periodo) faltan.push('periodo');
-    return faltan;
+    return CAMPOS_CONTEXTO.filter(function (c) { return !String(ctx[c.clave] || '').trim(); });
+  }
+  function etiquetasDe(faltan) {
+    return faltan.map(function (c) { return c.etiqueta; }).join(', ');
+  }
+
+  // Resalta en rojo los campos que faltan y quita la marca en cuanto se llenan.
+  function marcarFaltantes(faltan) {
+    Array.prototype.forEach.call(document.querySelectorAll('.falta'), function (el) {
+      el.classList.remove('falta');
+    });
+    faltan.forEach(function (c) {
+      if (!c.id) return;
+      var el = $(c.id);
+      if (!el) return;
+      el.classList.add('falta');
+      var quitar = function () {
+        el.classList.remove('falta');
+        el.removeEventListener('input', quitar);
+        el.removeEventListener('change', quitar);
+      };
+      el.addEventListener('input', quitar);
+      el.addEventListener('change', quitar);
+    });
   }
 
   function abrirModalIndividual() {
@@ -981,10 +1044,21 @@
     bannerInd.className = 'banner';
     if (faltan.length > 0) {
       mostrarBanner(banner, 'err',
-        'Antes de agregar un usuario, completa arriba: <b>' + escapeHtml(faltan.join(', ')) + '</b>.');
-      banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        'Antes de agregar un usuario, completa los datos del colegio: <b>' +
+        escapeHtml(etiquetasDe(faltan)) + '</b>.');
+      marcarFaltantes(faltan);
+      // El banner vive al pie del formulario, así que llevar la vista ahí podía
+      // dejar fuera de pantalla el campo que falta. Se salta al primero vacío:
+      // el aviso queda arriba y el cursor donde hay que escribir.
+      var primero = faltan.filter(function (c) { return c.id; })[0];
+      var destino = primero ? $(primero.id) : banner;
+      destino.scrollIntoView({ block: 'center' });
+      if (primero) destino.focus();
       return;
     }
+    // Ya está todo: se retira el aviso rojo que pudo quedar de un intento previo.
+    marcarFaltantes([]);
+    if (banner.classList.contains('err')) banner.className = 'banner';
     var ubic = [ctx.canton, ctx.ciudad].filter(Boolean).join(', ');
     $('modal-contexto').innerHTML =
       'Se agregará a <b>' + escapeHtml(ctx.nombreColegio) + '</b>' + (ubic ? ' (' + escapeHtml(ubic) + ')' : '') +
@@ -1020,7 +1094,12 @@
     var ctx = contextoColegio();
     var faltan = faltantesContexto(ctx);
     if (faltan.length > 0) {
-      mostrarBanner(bannerInd, 'err', 'Faltan datos del colegio: <b>' + escapeHtml(faltan.join(', ')) + '</b>.');
+      // El colegio se elige fuera del modal, así que además de avisar aquí se
+      // marcan los campos de atrás y se cierra para que se puedan corregir.
+      mostrarBanner(bannerInd, 'err',
+        'Faltan datos del colegio: <b>' + escapeHtml(etiquetasDe(faltan)) + '</b>. ' +
+        'Complétalos en el formulario y vuelve a intentarlo.');
+      marcarFaltantes(faltan);
       return;
     }
     var rol = formInd.rol.value;

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { coleccionEscalamientos } from '../db/mongo.js';
 import { textoAHtml } from '../utils/correo.js';
-import { conFirmaTexto } from '../utils/firma.js';
+import { conFirmaTexto, sinMarcasNegrita } from '../utils/firma.js';
 
 /**
  * Escalamiento = un caso que el asistente no pudo resolver y se deriva a una
@@ -136,9 +136,11 @@ export async function cargaPorAgente() {
   }));
 }
 
+// Los títulos van en negrita: el agente abre el correo para localizar un dato
+// concreto, y sin jerarquía visual todo el bloque se lee igual.
 function seccion(titulo, contenido) {
   const valor = String(contenido || '').trim();
-  return `${titulo}\n${valor || '(no proporcionado por el usuario)'}`;
+  return `**${titulo}**\n${valor || '(no proporcionado por el usuario)'}`;
 }
 
 export async function crearEscalamiento({
@@ -171,13 +173,13 @@ export async function crearEscalamiento({
 
   const cuerpoDelegacion = [
     'Hola,',
-    'El asistente automático de soporte no pudo resolver este caso y te lo delega. Toda la información que se pudo recopilar del usuario está abajo.',
-    seccion('DATOS DEL CASO', `Código: ${codigo}\nMotivo: ${motivoLegible}\nSolicitante: ${remitente}\nAsunto original: ${asunto || '(sin asunto)'}`),
+    'El asistente automático de soporte **no pudo resolver este caso y te lo delega**. Toda la información que se pudo recopilar del usuario está abajo.',
+    seccion('DATOS DEL CASO', `Código: **${codigo}**\nMotivo: ${motivoLegible}\nSolicitante: **${remitente}**\nAsunto original: ${asunto || '(sin asunto)'}`),
     seccion('QUÉ NECESITA EL USUARIO', descripcionDetallada),
     seccion('DATOS DEL ESTUDIANTE', datosEstudiante),
     seccion('DATOS DE LA INSTITUCIÓN', datosInstitucion),
     seccion('QUÉ INTENTÓ EL ASISTENTE Y POR QUÉ FALLÓ', intentosPrevios),
-    'CÓMO RESPONDER\nResponde a ESTE mismo correo con la solución. Tu respuesta se enviará automáticamente al usuario final, en el hilo de correo donde él escribió originalmente — así que redáctala como si le hablaras directamente a él o ella. No hace falta que copies el código del caso.',
+    '**CÓMO RESPONDER**\n**Responde a ESTE mismo correo** con la solución. Tu respuesta **se enviará automáticamente al usuario final**, en el hilo de correo donde él escribió originalmente — así que redáctala como si le hablaras directamente a él o ella. No hace falta que copies el código del caso.',
     'Soporte Santillana Ecuador (asistente automático)',
   ].join('\n\n');
 
@@ -217,7 +219,9 @@ export async function crearEscalamiento({
     correoDelegacion: {
       para: agenteEmail,
       asunto: asuntoDelegacion,
-      cuerpo: cuerpoDelegacion,
+      // El texto plano es el respaldo si el cliente de correo no renderiza
+      // HTML: ahí las marcas de negrita sobran.
+      cuerpo: sinMarcasNegrita(cuerpoDelegacion),
       // Correo interno para el agente: sin firma comercial.
       cuerpoHtml: textoAHtml(cuerpoDelegacion, { firma: false }),
     },

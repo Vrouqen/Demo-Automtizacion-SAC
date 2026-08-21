@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { registrarTicket, obtenerUltimoTicket } from './conversaciones.js';
 import { registrarDerivacionTicket } from './escalamientos.js';
 import { textoAHtml } from '../utils/correo.js';
+import { sinMarcasNegrita } from '../utils/firma.js';
 
 const EQUIPOS = {
   cuentas: 'Cuentas',
@@ -37,12 +38,12 @@ function armarCorreoTicket({ ticket, hiloId, asuntoOriginal, usuarioAfectado, in
 
   const cuerpo = [
     'Hola,',
-    'El asistente automático de soporte registró este ticket y te lo asigna.',
-    `DATOS DEL TICKET\nCódigo: ${ticket.jiraKey}\nTipo: ${tipoLegible}\nEquipo: ${EQUIPOS[ticket.equipo] || ticket.equipo}\nSolicitante: ${ticket.reportadoPor}`,
-    `QUÉ SE NECESITA\n${ticket.descripcion}`,
-    plataforma ? `PLATAFORMA\n${plataforma}` : null,
-    ticket.enlazadoA ? `TICKET RELACIONADO\nEste ticket viene del mismo hilo que ${ticket.enlazadoA}.` : null,
-    'CÓMO RESPONDER\nAtiende el ticket y responde directamente al solicitante en su hilo de correo original. Este aviso es informativo: responder a ESTE correo no llega al cliente.',
+    'El asistente automático de soporte **registró este ticket y te lo asigna**.',
+    `**DATOS DEL TICKET**\nCódigo: **${ticket.jiraKey}**\nTipo: ${tipoLegible}\nEquipo: ${EQUIPOS[ticket.equipo] || ticket.equipo}\nSolicitante: **${ticket.reportadoPor}**`,
+    `**QUÉ SE NECESITA**\n${ticket.descripcion}`,
+    plataforma ? `**PLATAFORMA**\n${plataforma}` : null,
+    ticket.enlazadoA ? `**TICKET RELACIONADO**\nEste ticket viene del mismo hilo que **${ticket.enlazadoA}**.` : null,
+    '**CÓMO RESPONDER**\nAtiende el ticket y **responde directamente al solicitante en su hilo de correo original**. Este aviso es informativo: responder a ESTE correo **no llega al cliente**.',
     `Referencia interna del hilo: ${hiloId}`,
   ]
     .filter(Boolean)
@@ -51,7 +52,8 @@ function armarCorreoTicket({ ticket, hiloId, asuntoOriginal, usuarioAfectado, in
   return {
     para,
     asunto: `[${ticket.jiraKey}] ${tipoLegible}${resumen ? ` — ${resumen}` : ''}`,
-    cuerpo,
+    // Respaldo en texto plano: sin las marcas de negrita.
+    cuerpo: sinMarcasNegrita(cuerpo),
     // Correo interno: sin firma comercial.
     cuerpoHtml: textoAHtml(cuerpo, { firma: false }),
     asuntoOriginal: asuntoOriginal || '',

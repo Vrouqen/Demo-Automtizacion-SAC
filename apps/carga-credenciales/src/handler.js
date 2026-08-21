@@ -1,5 +1,7 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { gzipSync } from 'zlib';
+import { createHash } from 'crypto';
 import path from 'path';
 import { config, validarConfig } from './config.js';
 import { parsearExcelCredenciales, registroIndividual } from './excel/parseExcel.js';
@@ -13,11 +15,58 @@ import { crearToken, verificarToken, tokenDeEvento, igualSeguro } from './utils/
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const paginaHtml = readFileSync(path.join(__dirname, 'public/index.html'), 'utf8');
 
+// La página se comprime y se le calcula el ETag UNA sola vez, al arrancar el
+// contenedor: no cambia hasta el siguiente despliegue, así que rehacerlo en cada
+// invocación sería gastar CPU (y milisegundos de respuesta) para nada.
+const paginaGzip = gzipSync(Buffer.from(paginaHtml, 'utf8'), { level: 9 });
+// El comprimido y el plano son representaciones DISTINTAS del mismo recurso, así
+// que cada una lleva su propio ETag; si compartieran uno, una caché podría
+// responder con la variante equivocada pese al 'vary'.
+const paginaEtag = '"' + createHash('sha1').update(paginaHtml).digest('base64').slice(0, 22) + '"';
+const paginaEtagGzip = paginaEtag.slice(0, -1) + '-gzip"';
+
+// max-age corto + ETag: dentro de un rato de uso (ir y volver por el menú de
+// TEE, que recarga el iframe cada vez) la página sale de la caché sin viajar a
+// AWS, y pasado el minuto la revalidación devuelve un 304 sin cuerpo. El precio
+// es que tras un despliegue puede verse la versión anterior durante ese minuto.
+const CACHE_PAGINA = 'public, max-age=60';
+
 function respuestaJson(statusCode, cuerpo) {
   return {
     statusCode,
-    headers: { 'content-type': 'application/json' },
+    // Estas respuestas llevan datos de colegios y credenciales descifradas: no
+    // deben quedar guardadas en la caché del navegador ni en intermediarios.
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
     body: JSON.stringify(cuerpo),
+  };
+}
+
+function cabecera(event, nombre) {
+  const headers = event.headers || {};
+  return headers[nombre] || headers[nombre.toLowerCase()] || '';
+}
+
+function aceptaGzip(event) {
+  return /\bgzip\b/i.test(cabecera(event, 'accept-encoding'));
+}
+
+// Las Function URL no comprimen solas. Si el cliente acepta gzip se comprime
+// aquí y se devuelve en base64, que es como Lambda transporta binario. Por
+// debajo de 1 KB no compensa: base64 engorda un 33% y lo ahorrado es nada.
+const MINIMO_COMPRIMIBLE = 1024;
+
+function comprimir(event, respuesta) {
+  const yaComprimida = respuesta.isBase64Encoded || (respuesta.headers || {})['content-encoding'];
+  if (yaComprimida || !respuesta.body || !aceptaGzip(event)) return respuesta;
+
+  const bruto = Buffer.from(respuesta.body, 'utf8');
+  if (bruto.length < MINIMO_COMPRIMIBLE) return respuesta;
+
+  return {
+    ...respuesta,
+    headers: { ...respuesta.headers, 'content-encoding': 'gzip' },
+    body: gzipSync(bruto).toString('base64'),
+    isBase64Encoded: true,
   };
 }
 
@@ -53,7 +102,9 @@ function respuestaJson(statusCode, cuerpo) {
  * GET ?listar=1 -> lista los colegios cargados (sin credenciales), con sus
  * plataformas, periodos y cantidad de estudiantes.
  */
-export const handler = async (event) => {
+export const handler = async (event) => comprimir(event, await responder(event));
+
+const responder = async (event) => {
   try {
     validarConfig();
 
@@ -67,11 +118,32 @@ export const handler = async (event) => {
     const pideDatos = Boolean(query.listar || query.opciones || query.buscar);
 
     if (metodo === 'GET' && !pideDatos) {
-      return {
-        statusCode: 200,
-        headers: { 'content-type': 'text/html; charset=utf-8' },
-        body: paginaHtml,
+      const conGzip = aceptaGzip(event);
+      // 'vary' es obligatorio al negociar gzip: sin él una caché compartida
+      // podría entregarle el cuerpo comprimido a quien no sabe descomprimirlo.
+      const cabeceras = {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': CACHE_PAGINA,
+        etag: conGzip ? paginaEtagGzip : paginaEtag,
+        vary: 'Accept-Encoding',
       };
+
+      // El navegador ya tiene esta misma versión: se le confirma con un 304 y se
+      // ahorra el cuerpo entero.
+      if (cabecera(event, 'if-none-match') === cabeceras.etag) {
+        return { statusCode: 304, headers: cabeceras };
+      }
+
+      // Se sirve el gzip precalculado; si el cliente no lo acepta, el HTML tal cual.
+      if (conGzip) {
+        return {
+          statusCode: 200,
+          headers: { ...cabeceras, 'content-encoding': 'gzip' },
+          body: paginaGzip.toString('base64'),
+          isBase64Encoded: true,
+        };
+      }
+      return { statusCode: 200, headers: cabeceras, body: paginaHtml };
     }
 
     // Login: entrega un token firmado que las peticiones de datos deben traer.

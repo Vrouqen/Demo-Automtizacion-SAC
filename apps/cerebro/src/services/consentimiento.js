@@ -100,6 +100,36 @@ function campoDe(etiqueta) {
 }
 
 /**
+ * Intenta leer una línea SIN separador, del tipo "Cédula del estudiante
+ * 2300601594": se prueba como etiqueta el prefijo más largo que corresponda a
+ * un campo conocido, y el resto es el valor.
+ *
+ * Los límites de longitud no son decoración: sin ellos, la cláusula de
+ * confidencialidad que muchas firmas corporativas llevan al pie empezaría a
+ * casar con cualquier campo. Una etiqueta real no pasa de seis palabras ni un
+ * valor de ocho.
+ */
+function asignarSinSeparador(linea, asignar) {
+  if (linea.length > 120) return false;
+
+  const palabras = linea.split(/\s+/).filter(Boolean);
+  if (palabras.length < 2) return false;
+
+  const maximo = Math.min(6, palabras.length - 1);
+  for (let corte = maximo; corte >= 1; corte--) {
+    const valor = palabras.slice(corte);
+    if (valor.length > 8) continue;
+
+    const campo = campoDe(palabras.slice(0, corte).join(' '));
+    if (campo && campo !== 'otorgado') {
+      asignar(campo, valor.join(' '));
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Extrae del correo del representante los datos del consentimiento.
  *
  * Acepta lo que la gente escribe de verdad: campos etiquetados en cualquier
@@ -150,6 +180,11 @@ export function parsearConsentimiento(texto) {
       continue;
     }
 
+    // Sin dos puntos: "Cédula/ID del representante legal 1725617730". Pasa a
+    // menudo cuando el representante reescribe a mano solo lo que le faltaba, y
+    // antes se perdía el dato entero.
+    if (asignarSinSeparador(limpia, asignar)) continue;
+
     // Línea suelta: solo puede ser el sí o el no.
     const si = interpretarSiNo(limpia);
     if (si !== null) datos.otorgado ??= si;
@@ -175,6 +210,44 @@ export function parsearConsentimiento(texto) {
   }
 
   return datos;
+}
+
+/**
+ * Junta los datos de TODOS los correos del representante en este hilo.
+ *
+ * Es imprescindible: el correo que le pedimos dice "responda indicando
+ * únicamente esos datos", así que su segunda respuesta trae solo lo que
+ * faltaba. Mirando un mensaje suelto se perdía todo lo anterior y se le volvían
+ * a pedir los ocho campos una y otra vez — un bucle del que no salía.
+ *
+ * Gana el valor más reciente que no venga vacío, de modo que corregir una
+ * cédula mal escrita funcione sin tener que repetir el resto.
+ */
+export function acumularConsentimiento(textos) {
+  const total = {
+    otorgado: null,
+    representante: { nombres: '', apellidos: '', cedula: '' },
+    representado: { nombres: '', apellidos: '', cedula: '' },
+    parentesco: '',
+    textoOriginal: '',
+  };
+
+  const partes = [];
+  for (const texto of textos) {
+    const datos = parsearConsentimiento(texto);
+    if (datos.otorgado !== null) total.otorgado = datos.otorgado;
+    if (datos.parentesco) total.parentesco = datos.parentesco;
+    for (const grupo of ['representante', 'representado']) {
+      for (const campo of ['nombres', 'apellidos', 'cedula']) {
+        if (datos[grupo][campo]) total[grupo][campo] = datos[grupo][campo];
+      }
+    }
+    if (datos.textoOriginal) partes.push(datos.textoOriginal);
+  }
+
+  // La prueba guardada es todo lo que escribió, no solo el último correo.
+  total.textoOriginal = partes.join('\n\n--- (siguiente respuesta) ---\n\n').slice(0, 8000);
+  return total;
 }
 
 /**
@@ -365,8 +438,18 @@ export async function yaConsintio({ conversacion, remitente }) {
  *
  * @returns {{resultado:'otorgado'|'faltan'|'rechazado', texto?:string, faltan?:string[]}}
  */
-export async function procesarRespuestaConsentimiento({ hiloId, mensajeId, remitente, cuerpo }) {
-  const datos = parsearConsentimiento(cuerpo);
+export async function procesarRespuestaConsentimiento({ conversacion, hiloId, mensajeId, remitente, cuerpo }) {
+  // Se leen todos los correos del representante en el hilo, no solo el último.
+  const textos = (conversacion?.mensajes || [])
+    .filter((m) => m.rol === 'usuario')
+    .map((m) => String(m.cuerpo || ''))
+    .filter(Boolean);
+
+  // El correo actual ya suele estar en el historial; si no lo estuviera (por
+  // llegar sin mensajeId), se añade para no perderlo.
+  if (cuerpo && textos[textos.length - 1] !== cuerpo) textos.push(cuerpo);
+
+  const datos = acumularConsentimiento(textos);
 
   // Negativa explícita: se registra y se deriva a una persona.
   if (datos.otorgado === false) {

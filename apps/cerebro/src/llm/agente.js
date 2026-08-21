@@ -978,7 +978,7 @@ export async function procesarCorreo({
 
       // Respuesta a la política: puede venir completa, incompleta o negada.
       const respuesta = esperando
-        ? await procesarRespuestaConsentimiento({ hiloId, mensajeId, remitente, cuerpo })
+        ? await procesarRespuestaConsentimiento({ conversacion, hiloId, mensajeId, remitente, cuerpo })
         : null;
 
       if (respuesta?.resultado === 'otorgado') {
