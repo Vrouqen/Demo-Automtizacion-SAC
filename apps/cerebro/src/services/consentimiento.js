@@ -394,14 +394,26 @@ export function textoRechazo() {
   );
 }
 
-/** Texto que se envía al cliente cuando su solicitud se delega por no responder. */
+/**
+ * Texto que recibe el cliente cuando vence el plazo sin consentimiento.
+ *
+ * Además de avisar de la delegación, le PIDE que describa su problema: sin
+ * consentimiento no se pudo tratar ningún dato, así que lo único que el agente
+ * va a tener es lo que el cliente escriba ahora.
+ */
 export function textoDelegacionPorNoAceptar() {
   return (
-    'Estimado/a usuario/a:\n\n' +
-    'No recibimos su consentimiento para el tratamiento de datos dentro del plazo, por lo que su ' +
-    'solicitud será atendida **directamente por un agente** de nuestro equipo.\n\n' +
-    'Un agente le responderá por este mismo correo en un plazo de **48 a 52 horas**. Si desea que la ' +
-    'atención sea **inmediata y automática**, puede enviarnos el consentimiento en cualquier momento.'
+    'Estimado/a usuario/a:' + '\n\n' +
+    'No recibimos su consentimiento para el tratamiento automatizado de datos dentro del plazo, así ' +
+    'que su solicitud pasa a un **agente digital de servicio**, que la atenderá mediante verificación ' +
+    'manual.' + '\n\n' +
+    '**Para que podamos resolverla cuanto antes, responda a este mismo correo describiendo:**\n' +
+    '- Qué necesita exactamente y para qué\n' +
+    '- Desde cuándo tiene el problema y qué mensaje de error ve, si aplica\n' +
+    '- Nombre del estudiante, unidad educativa, grado y paralelo' + '\n\n' +
+    'Un agente le responderá por este mismo correo en un plazo de **48 a 52 horas**.' + '\n\n' +
+    'Si prefiere la atención **inmediata y automática**, puede enviarnos el consentimiento en ' +
+    'cualquier momento.'
   );
 }
 
@@ -621,6 +633,21 @@ export async function delegarConsentimientosVencidos({ horas } = {}) {
 
   for (const conv of pendientes) {
     const ultimo = ultimoMensajeCliente(conv);
+
+    // Aunque no completara el consentimiento, puede haber respondido a medias.
+    // Todo lo que llegó a escribir va al agente: es la diferencia entre que
+    // pueda empezar a trabajar y que tenga que escribirle otra vez al cliente.
+    const parcial = acumularConsentimiento(
+      (conv.mensajes || []).filter((m) => m.rol === 'usuario').map((m) => String(m.cuerpo || ''))
+    );
+    const nombreEstudiante = [parcial.representado.nombres, parcial.representado.apellidos]
+      .filter(Boolean).join(' ');
+    const institucion = [parcial.solicitud.institucion, parcial.solicitud.ciudad, parcial.solicitud.provincia]
+      .filter(Boolean).join(', ');
+    const grados = [parcial.solicitud.grado && `Grado: ${parcial.solicitud.grado}`,
+                    parcial.solicitud.paralelo && `Paralelo: ${parcial.solicitud.paralelo}`]
+      .filter(Boolean).join(' — ');
+
     let escalamiento = null;
     try {
       escalamiento = await crearEscalamiento({
@@ -629,14 +656,19 @@ export async function delegarConsentimientosVencidos({ horas } = {}) {
         remitente: conv.remitente,
         asunto: conv.asunto,
         motivo: 'otro',
-        resumenCorto: 'Sin consentimiento de datos — atender solicitud',
+        resumenCorto: nombreEstudiante
+          ? `Sin consentimiento — ${nombreEstudiante}`.slice(0, 70)
+          : 'Sin consentimiento de datos — atender solicitud',
         descripcionDetallada:
-          'El representante NO envió el consentimiento de tratamiento de datos dentro del plazo. ' +
-          'Atiende su solicitud original directamente (SLA 48–52 h). Solicitud del cliente:\n\n' +
+          'El representante NO envió el consentimiento dentro del plazo, así que la identidad NO se ' +
+          'validó automáticamente: verifícala tú antes de entregar nada. Atiende su solicitud ' +
+          'directamente (SLA 48–52 h).\n\nLO QUE ESCRIBIÓ EL CLIENTE:\n' +
           resumenSolicitud(conv),
-        datosEstudiante: 'no proporcionado',
-        datosInstitucion: 'no proporcionado',
-        intentosPrevios: 'Se envió la política de datos y no hubo respuesta en el plazo.',
+        datosEstudiante: [nombreEstudiante, grados].filter(Boolean).join(' — ') || 'no proporcionado',
+        datosInstitucion: institucion || 'no proporcionado',
+        intentosPrevios:
+          'Se envió la política de datos y no hubo consentimiento en el plazo. Al cliente se le ha ' +
+          'pedido que describa su problema en este mismo hilo.',
       });
     } catch (err) {
       console.error('[consentimiento] no se pudo delegar el caso:', err.message);

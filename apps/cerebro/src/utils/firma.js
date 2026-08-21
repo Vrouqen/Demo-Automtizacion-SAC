@@ -15,12 +15,29 @@ import { config } from '../config.js';
 // inventados ni a medias.
 
 const CONTACTO = {
-  direccion: 'Av. Simón Bolívar y Vía Nayón. Centro Corporativo Ekopark. Torre 5, piso 5.',
-  ciudad: 'Quito, Ecuador',
-  correo: 'soporteecuador@santillana.com',
-  telefonos: '(02) 3350356 / 3350347 / 3350357',
-  webs: ['www.santillana.com.ec', 'www.tiendasantillana.com.ec'],
+  direccion: 'Vía a Nayón y De Los Granados.',
+  edificio: 'Centro Corporativo Ekopark. Torre 5, piso 5.',
+  ciudad: 'Quito, Ecuador.',
+  telefonos: '(+593) 2 3350 356 / 2 3350 347 / 2 3350 357',
+  webs: ['santillana.com.ec', 'www.tiendasantillana.com.ec'],
 };
+
+/**
+ * Aviso de confidencialidad. Va en CURSIVA al pie de cada correo, por debajo
+ * del banner y por encima de la firma.
+ */
+const CONFIDENCIALIDAD = [
+  'La información contenida en este correo electrónico y sus anexos es para uso exclusivo de la ' +
+    'persona o entidad a la que va dirigida, ya que puede contener datos que sean privilegiados o ' +
+    'confidenciales. Si usted respetado lector no es el destinatario previsto de este mensaje, tenga ' +
+    'presente que cualquier proceso de divulgación, distribución o copia está estrictamente ' +
+    'prohibido. Si ha recibido el mensaje por error, por favor notifíquelo al correo del cual fue ' +
+    'enviado.',
+  'Agradecemos su amable atención.',
+];
+
+/** Tipografía del correo: Arial 10, como pide la guía de marca. */
+export const TIPOGRAFIA_CORREO = "font-family:Arial,Helvetica,sans-serif;font-size:10pt;line-height:1.5;color:#222222;";
 
 /** Versión en texto plano (la que se guarda en Mongo y ve un cliente sin HTML). */
 export const FIRMA_TEXTO = [
@@ -29,8 +46,8 @@ export const FIRMA_TEXTO = [
   'Soporte Santillana Ecuador.',
   '',
   CONTACTO.direccion,
+  CONTACTO.edificio,
   CONTACTO.ciudad,
-  CONTACTO.correo,
   CONTACTO.telefonos,
   ...CONTACTO.webs,
 ].join('\n');
@@ -117,6 +134,12 @@ export const LOGOS = [
   // sin que llegue a dominar la tira. Aun así el texto queda muy pequeño; para
   // que se lea de verdad haría falta una versión horizontal del logo.
   { cid: 'logo-creo', alt: 'sistemacreo.com', archivo: 'creo.png', ancho: 52, alto: 47 },
+  // Sello Great Place To Work, a la derecha del logo Santillana.
+  { cid: 'logo-gptw', alt: 'Great Place To Work Certified', archivo: 'gptw.png', ancho: 46, alto: 46 },
+  // Banners de EDI: cabecera y pie del correo al cliente. Anchos pensados para
+  // el ancho útil de Outlook (~600 px) sin desbordar en móvil.
+  { cid: 'banner-edi-cabecera', alt: 'EDI · Ecosistema Digital Integrado 2.0', archivo: 'edi-cabecera.png', ancho: 600, alto: 63 },
+  { cid: 'banner-edi-pie', alt: 'Consultas: servicioalclienteec@santillana.com o 1 800 212 000', archivo: 'edi-pie.png', ancho: 600, alto: 74 },
 ];
 
 // El "slug" es el nombre corto por el que se pide el logo en la URL
@@ -143,9 +166,23 @@ export function bytesLogo(slug) {
   return cacheBytes.get(l.cid);
 }
 
+/**
+ * ¿El PNG existe en disco? Los banners de EDI se declaran antes de que lleguen
+ * los archivos definitivos; sin esta comprobación el correo saldría con cuadros
+ * rotos, que es peor que salir sin banner.
+ */
+function archivoDisponible(l) {
+  try {
+    bytesLogo(slugLogo(l.cid));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function imagen(nombre) {
   const l = LOGOS.find((x) => x.cid === nombre);
-  if (!config.firma.logos || !l) return '';
+  if (!config.firma.logos || !l || !archivoDisponible(l)) return '';
 
   // Opción A (cid): el logo viaja adjunto; n8n/Graph lo resuelve por Content-ID.
   // Opción B (url): el logo se sirve desde esta misma Lambda. Si falta la URL,
@@ -161,6 +198,28 @@ function imagen(nombre) {
   return `<img src="${src}" alt="${l.alt}" width="${l.ancho}" height="${l.alto}" style="border:0;display:inline-block;vertical-align:middle;max-width:${l.ancho}px;">`;
 }
 
+/** Banner superior de EDI. Vacío mientras no esté el PNG. */
+export function bannerCabeceraHtml() {
+  const img = imagen('banner-edi-cabecera');
+  return img ? `<div style="margin:0 0 18px 0;">${img}</div>` : '';
+}
+
+/**
+ * Pie del correo al cliente: banner de contacto de EDI + aviso de
+ * confidencialidad en cursiva. Va DEBAJO del cuerpo y ENCIMA de la firma.
+ */
+export function bannerPieHtml() {
+  const img = imagen('banner-edi-pie');
+  const confidencial = CONFIDENCIALIDAD.map(
+    (p) => `<p style="margin:0 0 10px 0;font-style:italic;font-size:9pt;color:#555555;">${p}</p>`
+  ).join('');
+
+  return (
+    (img ? `<div style="margin:18px 0 14px 0;">${img}</div>` : '<div style="margin-top:18px;"></div>') +
+    `<div style="${TIPOGRAFIA_CORREO}">${confidencial}</div>`
+  );
+}
+
 /**
  * Bloque HTML de la firma. Se escribe con estilos en línea y tablas porque
  * Outlook no aplica hojas de estilo ni soporta flex/grid en el cuerpo del
@@ -168,22 +227,25 @@ function imagen(nombre) {
  */
 export function firmaHtml() {
   const logoPrincipal = imagen('logo-santillana');
-  const marcas = ['logo-loqueleo', 'logo-compartir', 'logo-richmond', 'logo-creo'].map(imagen).filter(Boolean);
+  const sello = imagen('logo-gptw');
+  const marcas = ['logo-compartir', 'logo-richmond', 'logo-creo', 'logo-loqueleo'].map(imagen).filter(Boolean);
+
+  const cabecera = [logoPrincipal, sello].filter(Boolean).join('&nbsp;&nbsp;');
 
   return (
-    '<div style="font-family:\'Segoe UI\',Arial,sans-serif;font-size:14px;line-height:1.5;color:#222222;">' +
-      '<p style="margin:0 0 12px 0;">Saludos Cordiales.</p>' +
-      '<p style="margin:0 0 16px 0;"><strong>Soporte Santillana Ecuador.</strong></p>' +
-      (logoPrincipal ? `<div style="margin:0 0 14px 0;">${logoPrincipal}</div>` : '') +
-      '<div style="border-top:1px solid #dddddd;padding-top:12px;font-size:12px;line-height:1.6;color:#555555;">' +
+    `<div style="${TIPOGRAFIA_CORREO}">` +
+      '<p style="margin:18px 0 12px 0;">Saludos cordiales,</p>' +
+      '<p style="margin:0 0 14px 0;"><strong>Soporte Santillana Ecuador</strong></p>' +
+      (cabecera ? `<div style="margin:0 0 14px 0;">${cabecera}</div>` : '') +
+      '<div style="line-height:1.7;">' +
         `<div>${CONTACTO.direccion}</div>` +
+        `<div>${CONTACTO.edificio}</div>` +
         `<div>${CONTACTO.ciudad}</div>` +
-        `<div><a href="mailto:${CONTACTO.correo}" style="color:${ENLACE};text-decoration:none;">${CONTACTO.correo}</a></div>` +
         `<div>${CONTACTO.telefonos}</div>` +
-        `<div>${CONTACTO.webs.map(web).join(' &nbsp;|&nbsp; ')}</div>` +
+        CONTACTO.webs.map((u) => `<div>${web(u)}</div>`).join('') +
       '</div>' +
       (marcas.length > 0
-        ? `<div style="margin-top:14px;">${marcas.map((m) => `<span style="margin-right:18px;display:inline-block;">${m}</span>`).join('')}</div>`
+        ? `<div style="margin-top:16px;">${marcas.map((m) => `<span style="margin-right:18px;display:inline-block;">${m}</span>`).join('')}</div>`
         : '') +
     '</div>'
   );

@@ -6,7 +6,13 @@
 // si fueran del usuario. Aquí se convierte a texto y se corta el hilo citado,
 // de modo que al modelo solo llegue lo que el usuario escribió en ESTE correo.
 
-import { firmaHtml, quitarDespedida } from './firma.js';
+import {
+  firmaHtml,
+  quitarDespedida,
+  bannerCabeceraHtml,
+  bannerPieHtml,
+  TIPOGRAFIA_CORREO,
+} from './firma.js';
 
 const ENTIDADES = {
   nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
@@ -168,10 +174,15 @@ export function textoAHtml(texto, { firma = true } = {}) {
       (p) =>
         `<p style="margin:0 0 12px 0;">${aNegritas(escaparHtml(p)).replace(/\n/g, '<br>')}</p>`
     );
+  // Los correos al cliente van con la imagen de marca completa: banner de EDI
+  // arriba, cuerpo, banner de contacto + confidencialidad, y firma. Los correos
+  // INTERNOS (delegación a un agente, aviso de ticket) van sin nada de eso:
+  // son de trabajo, no comerciales, y el banner solo estorbaría.
   return (
-    `<div style="font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.5;color:#222222;">` +
+    (firma ? bannerCabeceraHtml() : '') +
+    `<div style="${TIPOGRAFIA_CORREO}">` +
     parrafos.join('') +
     `</div>` +
-    (firma ? firmaHtml() : '')
+    (firma ? bannerPieHtml() + firmaHtml() : '')
   );
 }

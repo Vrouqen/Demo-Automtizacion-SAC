@@ -20,6 +20,25 @@ import { encolar, desencolar } from '../services/cola.js';
 
 const MAX_ITERACIONES_TOOLS = 6;
 
+/**
+ * Herramientas que tratan datos personales de una persona concreta y que, por
+ * tanto, exigen consentimiento previo.
+ *
+ * Fuera quedan a propósito:
+ *  - info_pin y fuera_de_alcance, que no tocan ningún dato.
+ *  - consultar_estudiantes_activos, que devuelve un CONTEO agregado de un
+ *    colegio, no datos de un alumno identificable.
+ *
+ * Esta lista es la que evita pedirle a alguien la cédula de su hijo para
+ * responderle sobre un micrófono: la política solo se envía si el correo
+ * realmente va a tratar datos.
+ */
+const HERRAMIENTAS_CON_DATOS_PERSONALES = new Set([
+  'buscar_credenciales',
+  'crear_ticket',
+  'derivar_a_agente_digital',
+]);
+
 // Estados de buscar_credenciales en los que el asistente PIDE algo al usuario y
 // queda a la espera de su respuesta (candidatos al cierre automático por 24h).
 const ESTADOS_ESPERANDO_USUARIO = new Set([
@@ -534,6 +553,16 @@ export function validarDatosDerivacion(args, { turnosUsuario = 1 } = {}) {
 }
 
 async function ejecutarTool(nombre, args, contexto) {
+  // Puerta de consentimiento, aplicada por herramienta y no por correo: hasta
+  // aquí no se sabía si el correo iba a tratar datos personales o no.
+  if (contexto.exigeConsentimiento && HERRAMIENTAS_CON_DATOS_PERSONALES.has(nombre)) {
+    contexto.faltaConsentimiento = true;
+    return {
+      status: 'FALTA_CONSENTIMIENTO',
+      mensaje: 'No se puede continuar sin el consentimiento de tratamiento de datos. No respondas al usuario.',
+    };
+  }
+
   try {
     switch (nombre) {
       case 'buscar_credenciales': {
@@ -1002,6 +1031,11 @@ export async function procesarCorreo({
   // modelo para que NO se los vuelva a pedir: el correo de política ya los pide
   // todos, y repreguntarlos es el error que más hace abandonar un caso.
   let datosDelConsentimiento = null;
+  // Se activa cuando el remitente aún no ha consentido: las herramientas que
+  // tratan datos personales quedarán bloqueadas hasta que lo haga.
+  let exigeConsentimiento = false;
+
+  puertaConsentimiento:
   if (config.consentimiento.habilitado && !esCorreoInterno(remitente)) {
     const yaAcepto = await yaConsintio({ conversacion, remitente });
     if (!yaAcepto) {
@@ -1026,6 +1060,7 @@ export async function procesarCorreo({
         // negativa registrada, datos incompletos, o primer envío de la política.
         let texto;
         let estadoFinal = 'esperando_consentimiento';
+        let respondeAhora = true;
 
         if (respuesta?.resultado === 'rechazado') {
           // Queda constancia de la negativa (exigido por la norma) y el caso
@@ -1040,9 +1075,17 @@ export async function procesarCorreo({
           });
           texto = respuesta.texto;
         } else {
-          await registrarEvento(hiloId, { tipo: 'politica_enviada', detalle: {} });
-          texto = textoPolitica({ hiloId });
+          // Primer contacto sin consentimiento: NO se envía la política aquí.
+          // Todavía no se sabe si el correo va a tratar datos personales —
+          // preguntar por la cédula de un menor para una consulta que no lo
+          // necesita es pedir datos de más. Se marca y se deja decidir al
+          // modelo; la política se envía solo si llama a una herramienta que
+          // trate datos (ver HERRAMIENTAS_CON_DATOS_PERSONALES).
+          exigeConsentimiento = true;
+          respondeAhora = false;
         }
+
+        if (!respondeAhora) break puertaConsentimiento;
 
         await actualizarEstado(hiloId, estadoFinal);
         await registrarMensaje(hiloId, { rol: 'asistente', cuerpo: texto });
@@ -1118,6 +1161,10 @@ export async function procesarCorreo({
     huboTools: false,
     // Se llena si una herramienta imprescindible falló: aborta la respuesta.
     errorCritico: null,
+    // El remitente no ha consentido: las herramientas con datos personales
+    // quedan bloqueadas y, si el modelo llama a alguna, se le envía la política.
+    exigeConsentimiento,
+    faltaConsentimiento: false,
     // Cuántos correos ha escrito el usuario en este hilo (incluido el actual).
     // Con 1 estamos en el primer contacto: no se deriva ni se crea un ticket
     // sin haberle preguntado antes lo que falta.
@@ -1143,6 +1190,10 @@ export async function procesarCorreo({
         ultimoResultado = resultado;
       }
       contents.push({ role: 'user', parts: partesResultado });
+
+      // El modelo intentó tratar datos personales sin consentimiento: la
+      // respuesta es la política, no hace falta otra vuelta al modelo.
+      if (contexto.faltaConsentimiento) break;
 
       // Corto-circuito de cuota: si la única herramienta de esta vuelta tiene
       // desenlace determinista, se redacta la respuesta con plantilla y se
@@ -1228,6 +1279,26 @@ export async function procesarCorreo({
       };
     }
     throw err;
+  }
+
+  // El correo SÍ requería tratar datos personales y el remitente aún no ha
+  // consentido: ahora —y solo ahora— se le envía la política. Se descarta lo
+  // que el modelo hubiera redactado: la respuesta correcta es el formulario.
+  if (contexto.faltaConsentimiento) {
+    await registrarEvento(hiloId, { tipo: 'politica_enviada', detalle: {} });
+    const texto = textoPolitica({ hiloId });
+    await actualizarEstado(hiloId, 'esperando_consentimiento');
+    await registrarMensaje(hiloId, { rol: 'asistente', cuerpo: texto });
+    return {
+      hiloId,
+      accion: 'responder',
+      estado: 'esperando_consentimiento',
+      mensajeIdRespuesta: mensajeId || null,
+      textoRespuesta: conFirmaTexto(texto),
+      textoRespuestaHtml: textoAHtml(texto),
+      ticket: null,
+      escalamiento: null,
+    };
   }
 
   // Una herramienta crítica falló (no se pudo crear el caso / no hay agente al
