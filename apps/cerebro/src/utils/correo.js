@@ -183,7 +183,7 @@ export function textoAHtml(texto, { firma = true } = {}) {
     `<div style="${TIPOGRAFIA_CORREO}">` +
     parrafos.join('') +
     `</div>` +
-    (firma ? bannerPieHtml() + firmaHtml() : '');
+    (firma ? firmaHtml() + bannerPieHtml() : '');
 
   // Los correos internos van sueltos: no llevan banner, así que no hay nada con
   // lo que alinearlos y una anchura fija solo estorbaría al leerlos.

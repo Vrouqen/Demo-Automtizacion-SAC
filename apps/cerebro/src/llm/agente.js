@@ -897,10 +897,8 @@ function datosYaEntregados(registro) {
 
   const s = registro.solicitud || {};
   const filas = [
-    ['Nombre completo del estudiante', [registro.representado?.nombres, registro.representado?.apellidos].filter(Boolean).join(' ')],
+    ['Nombre completo del estudiante', registro.representado?.nombre],
     ['Unidad educativa', s.institucion],
-    ['Ciudad', s.ciudad],
-    ['Provincia', s.provincia],
     ['Nivel/Grado', s.grado],
     ['Paralelo', s.paralelo],
   ].filter(([, valor]) => valor);

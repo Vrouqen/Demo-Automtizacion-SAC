@@ -244,24 +244,24 @@ El flujo es enteramente por correo: no hay página web ni el mensaje ejecuta nad
 
 1. El cliente escribe. El asistente responde con la **política** y deja el hilo en
    `esperando_consentimiento`. La solicitud no se atiende todavía.
-2. El representante responde con **«Sí»** y el formulario de diez campos. Cuando están completos y
+2. El representante responde con **«Sí»** y el formulario de ocho campos. Cuando están completos y
    válidos se crea el registro y se atiende la **solicitud original**, sin volver a preguntar nada:
    el mismo correo ya recogió colegio, ciudad, provincia, grado y paralelo.
 3. Si responde **a medias**, se le piden solo los campos que faltan, con el motivo concreto.
 4. Si **niega** el consentimiento, la negativa **queda registrada** (`¿Otorgado? = No`) y su solicitud
    pasa a un agente humano. No se le deja sin atención por no consentir.
 5. Si **no responde en 48 horas**, un proceso programado delega la solicitud a un agente, que le
-   responderá en 48 a 52 horas.
+   responderá mediante verificación manual, que puede superar las 72 horas.
 
 ### Los campos del registro
 
 | Campo | Notas |
 |---|---|
 | Fecha · Hora | Separadas, en hora de Ecuador (`America/Guayaquil`) |
-| Nombres · Apellidos · Cédula/ID **del representante legal** | |
+| Nombre y Apellido · Cédula **del representante legal** | El nombre va en **un solo campo**, no partido |
 | Parentesco / Relación | |
-| Nombres · Apellidos **del estudiante** | La cédula del estudiante ya no se pide |
-| Unidad Educativa · Ciudad · Provincia · Grado · Paralelo | Datos de la solicitud, en el mismo correo |
+| Nombres y Apellidos **del estudiante** | La cédula del estudiante no se pide |
+| Unidad Educativa · Grado · Paralelo | Datos de la solicitud, en el mismo correo |
 | Finalidad del consentimiento | `Uso de IA para validar identidad` |
 | ¿Otorgado? | `Sí` / `No` — **la negativa también se registra** |
 
@@ -274,11 +274,17 @@ Ecuador.
 
 ### Cómo se interpreta la respuesta
 
-El parseo acepta lo que la gente escribe de verdad: campos en cualquier orden, con o sin guiones o
-numeración, con o sin tildes, con o sin los dos puntos (`Cédula del estudiante 2300601594` funciona
-igual), nombres y apellidos juntos o separados, y el «Sí» en su propia línea o como valor de una
-etiqueta. Si escriben el nombre completo en el campo de nombres, se reparte solo, en vez de pedirles
-un dato que ya dieron.
+El parseo **localiza las etiquetas por posición** y toma como valor todo lo que va de una etiqueta a
+la siguiente. Por eso estas tres formas dan el mismo resultado:
+
+```
+Nombre: Luis Loor          Cédula: 1725617730
+nombre Luis Loor, cedula 1725617730
+Nombre y Apellido Representante Legal Luis Loor
+```
+
+Antes se exigían dos puntos y una etiqueta por línea, así que la segunda forma —la que más escribe la
+gente— se perdía entera. También da igual el orden, los guiones, la numeración y las tildes.
 
 **Los datos se acumulan a lo largo del hilo.** Es imprescindible: el correo que se les envía dice
 «responda indicando únicamente esos datos», así que su segunda respuesta trae solo lo que faltaba.
@@ -296,10 +302,15 @@ esa comprobación el registro se llenaría de números inválidos y no probaría
 pasaporte y documento extranjero, marcados como no verificados, para no bloquear a representantes no
 ecuatorianos.
 
-**Ciudad y Provincia se piden pero no bloquean.** Mucha gente no sabe de memoria la provincia del
-colegio, y exigirlas reproduciría el bucle de preguntas que este flujo acaba de dejar atrás. Si las
-dan, se registran. Sí bloquean, en cambio, Unidad Educativa, Grado y Paralelo: sin ellos no se puede
-buscar la credencial.
+**Ciudad y provincia no se piden en el primer contacto.** Solo sirven para desempatar cuando hay
+colegios con el mismo nombre, y pedírselas a todo el mundo alarga cada caso para resolver unos pocos.
+El asistente las pide **cuando la búsqueda devuelve varias coincidencias**, que es cuando aportan
+algo. Sí bloquean, en cambio, Unidad Educativa, Grado y Paralelo: sin ellos no se puede buscar la
+credencial.
+
+**El nombre se guarda entero, en un solo campo.** Partirlo en nombres y apellidos obligaba a adivinar
+dónde acaba uno y empieza el otro; con dos nombres y un apellido —o al revés— se equivocaba. El
+formulario ya lo pide junto («Nombre y Apellido Representante Legal»), así que se guarda tal cual.
 
 El correo cita una **referencia de incidencia** (`SSE-XXXXXX`) derivada del identificador del hilo,
 así que es estable para ese caso sin necesidad de un contador central.
@@ -308,7 +319,7 @@ Una negativa explícita («no acepto») escrita en cualquier parte del correo ma
 
 ### Reporte
 
-`GET /?reporte=consentimientos` devuelve el registro con las diez columnas en el orden exigido; con
+`GET /?reporte=consentimientos` devuelve el registro con las ocho columnas en el orden exigido; con
 `&formato=csv` se descarga listo para archivar o entregar a auditoría. Admite `desde` y `hasta`. Va
 protegido por token: contiene datos personales de menores.
 

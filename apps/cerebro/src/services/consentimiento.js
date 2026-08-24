@@ -58,19 +58,6 @@ export function fechaHoraLocal(momento = new Date()) {
   };
 }
 
-/**
- * Parte un nombre completo en nombres y apellidos siguiendo la convención
- * ecuatoriana (dos nombres y dos apellidos). Es una heurística: solo se usa
- * cuando el representante escribió todo junto en vez de en campos separados.
- */
-function partirNombre(completo) {
-  const p = String(completo || '').split(/\s+/).filter(Boolean);
-  if (p.length >= 4) return { nombres: p.slice(0, p.length - 2).join(' '), apellidos: p.slice(-2).join(' ') };
-  if (p.length === 3) return { nombres: p[0], apellidos: p.slice(1).join(' ') };
-  if (p.length === 2) return { nombres: p[0], apellidos: p[1] };
-  return { nombres: p.join(' '), apellidos: '' };
-}
-
 /** Interpreta un valor como sí / no / indeterminado. */
 function interpretarSiNo(valor) {
   const v = normalizar(valor).replace(/[.\s]+$/, '');
@@ -81,76 +68,95 @@ function interpretarSiNo(valor) {
   return null;
 }
 
-/** A qué campo del registro corresponde una etiqueta escrita por el usuario. */
+/**
+ * Etiquetas que se reconocen en la respuesta del representante.
+ *
+ * El orden importa: se prueban de arriba abajo, así que las más específicas van
+ * primero. "Nombre y Apellidos del estudiante" tiene que ganarle a "Nombre",
+ * y "Cédula Representante" a "Cédula" a secas.
+ *
+ * Se listan en su forma NORMALIZADA (minúsculas y sin tildes).
+ */
+const ETIQUETAS = [
+  ['otorgado', /autoriz\w*|consient\w*|otorg\w*|acept\w*|consentimiento/],
+  ['parentesco', /parentesco|relacion|vinculo/],
+  ['solicitud.institucion', /unidad educativa|instituci\w*|colegio|escuela|plantel/],
+  ['solicitud.provincia', /provincia/],
+  ['solicitud.ciudad', /ciudad|canton/],
+  ['solicitud.paralelo', /paralelo|grupo|seccion/],
+  ['solicitud.grado', /grado|nivel|curso/],
+  ['representado.cedula', /(?:cedula|documento|identificacion|pasaporte|c\.?i\.?|id)\s*(?:de|del|de la)?\s*(?:estudiante|representad\w*|alumn\w*|hij[oa]|menor)/],
+  ['representante.cedula', /(?:cedula|documento|identificacion|pasaporte|c\.?i\.?|id)(?:\s*(?:de|del|de la)?\s*(?:representante|padre|madre|solicitante|apoderad\w*)\w*(?:\s*legal)?)?/],
+  ['representado.nombre', /nombres?\s*(?:y\s*apellidos?)?\s*(?:de|del|de la)?\s*(?:estudiante|representad\w*|alumn\w*|hij[oa]|menor)/],
+  ['representante.nombre', /nombres?\s*(?:y\s*apellidos?)?(?:\s*(?:de|del|de la)?\s*(?:representante|padre|madre|solicitante|apoderad\w*)\w*(?:\s*legal)?)?/],
+  ['representado.nombre', /apellidos?\s*(?:de|del|de la)?\s*(?:estudiante|representad\w*|alumn\w*|hij[oa]|menor)/],
+  ['representante.nombre', /apellidos?/],
+];
+
+// Una sola expresión con todas las etiquetas, para localizarlas dentro de la
+// línea sin importar si el usuario puso dos puntos, comas o nada.
+const RE_ETIQUETAS = new RegExp(
+  '(?:^|[\\s,;.·|-])(' + ETIQUETAS.map(([, re]) => re.source).join('|') + ')\\s*[:=]?\\s*',
+  'gi'
+);
+
+/** A qué campo corresponde un trozo de texto que ya sabemos que es etiqueta. */
 function campoDe(etiqueta) {
   const e = normalizar(etiqueta);
-  if (/(parentesco|relacion|vinculo)/.test(e)) return 'parentesco';
-  if (/(autoriz|consent|otorg|acept)/.test(e)) return 'otorgado';
-
-  // Datos de la solicitud. Se piden en el MISMO correo que el consentimiento
-  // para no encadenar dos rondas de preguntas al representante.
-  if (/(unidad educativa|instituci|colegio|escuela|plantel)/.test(e)) return 'solicitud.institucion';
-  if (/provincia/.test(e)) return 'solicitud.provincia';
-  if (/ciudad/.test(e)) return 'solicitud.ciudad';
-  if (/(paralelo|grupo|secci)/.test(e)) return 'solicitud.paralelo';
-  if (/(grado|nivel|curso)/.test(e)) return 'solicitud.grado';
-
-  // "del estudiante" manda sobre "del representante": una etiqueta como
-  // "Nombres del estudiante" contiene ambas ideas solo si se lee mal.
-  const grupo = /(estudiante|representad|alumn|hij[oa]|menor)/.test(e) ? 'representado' : 'representante';
-
-  if (/(cedula|documento|identificacion|pasaporte|\bid\b)/.test(e)) return `${grupo}.cedula`;
-  if (/nombre/.test(e) && /apellido/.test(e)) return `${grupo}.completo`;
-  if (/apellido/.test(e)) return `${grupo}.apellidos`;
-  if (/nombre/.test(e)) return `${grupo}.nombres`;
+  for (const [campo, re] of ETIQUETAS) {
+    if (new RegExp('^(?:' + re.source + ')$', 'i').test(e)) return campo;
+  }
   return null;
 }
 
 /**
- * Intenta leer una línea SIN separador, del tipo "Cédula del estudiante
- * 2300601594": se prueba como etiqueta el prefijo más largo que corresponda a
- * un campo conocido, y el resto es el valor.
+ * Lee una línea localizando las ETIQUETAS por posición, y toma como valor todo
+ * lo que va entre una etiqueta y la siguiente.
  *
- * Los límites de longitud no son decoración: sin ellos, la cláusula de
- * confidencialidad que muchas firmas corporativas llevan al pie empezaría a
- * casar con cualquier campo. Una etiqueta real no pasa de seis palabras ni un
- * valor de ocho.
+ * Es lo que permite que estas tres formas den el mismo resultado:
+ *   Nombre: Luis          Apellido: Loor
+ *   nombre Luis, apellido Loor
+ *   Nombre y Apellido Representante Legal Luis Loor
+ *
+ * Antes se exigían dos puntos y una etiqueta por línea, así que la segunda
+ * forma —la que más escribe la gente— se perdía entera.
  */
-function asignarSinSeparador(linea, asignar) {
-  if (linea.length > 120) return false;
+function leerLinea(linea, asignar) {
+  const normalizada = normalizar(linea);
+  const encontradas = [...normalizada.matchAll(RE_ETIQUETAS)];
+  if (encontradas.length === 0) return false;
 
-  const palabras = linea.split(/\s+/).filter(Boolean);
-  if (palabras.length < 2) return false;
+  let asignoAlgo = false;
+  for (let i = 0; i < encontradas.length; i++) {
+    const actual = encontradas[i];
+    const campo = campoDe(actual[1]);
+    if (!campo) continue;
 
-  const maximo = Math.min(6, palabras.length - 1);
-  for (let corte = maximo; corte >= 1; corte--) {
-    const valor = palabras.slice(corte);
-    if (valor.length > 8) continue;
+    // El valor llega hasta donde empieza la siguiente etiqueta.
+    const desde = actual.index + actual[0].length;
+    const hasta = i + 1 < encontradas.length ? encontradas[i + 1].index : normalizada.length;
 
-    const campo = campoDe(palabras.slice(0, corte).join(' '));
-    if (campo && campo !== 'otorgado') {
-      asignar(campo, valor.join(' '));
-      return true;
-    }
+    // Se recorta sobre la línea ORIGINAL para conservar tildes y mayúsculas:
+    // la normalizada solo sirve para localizar, nunca para guardar.
+    const valor = linea.slice(desde, hasta).replace(/^[\s:=-]+|[\s,;.]+$/g, '');
+    if (valor) { asignar(campo, valor); asignoAlgo = true; }
   }
-  return false;
+  return asignoAlgo;
 }
 
 /**
  * Extrae del correo del representante los datos del consentimiento.
  *
- * Acepta lo que la gente escribe de verdad: campos etiquetados en cualquier
- * orden, con o sin guiones o numeración, nombres y apellidos juntos o
- * separados, y el "Sí" en su propia línea o como valor de una etiqueta.
- *
- * @returns {{otorgado: boolean|null, representante: object, representado: object,
- *            parentesco: string, textoOriginal: string}}
+ * El nombre se guarda ENTERO en un solo campo, tal como el formulario lo pide
+ * ("Nombre y Apellido Representante Legal"): partirlo en nombres y apellidos
+ * obligaba a adivinar dónde acaba uno y empieza el otro, y con dos nombres y un
+ * apellido —o al revés— se equivocaba.
  */
 export function parsearConsentimiento(texto) {
   const datos = {
     otorgado: null,
-    representante: { nombres: '', apellidos: '', cedula: '' },
-    representado: { nombres: '', apellidos: '', cedula: '' },
+    representante: { nombre: '', cedula: '' },
+    representado: { nombre: '', cedula: '' },
     parentesco: '',
     solicitud: { institucion: '', ciudad: '', provincia: '', grado: '', paralelo: '' },
     textoOriginal: String(texto || '').trim().slice(0, 4000),
@@ -166,14 +172,7 @@ export function parsearConsentimiento(texto) {
       if (si !== null) datos.otorgado ??= si;
       return;
     }
-
     const [grupo, sub] = campo.split('.');
-    if (sub === 'completo') {
-      const { nombres, apellidos } = partirNombre(v);
-      datos[grupo].nombres ||= nombres;
-      datos[grupo].apellidos ||= apellidos;
-      return;
-    }
     datos[grupo][sub] ||= v;
   };
 
@@ -181,35 +180,11 @@ export function parsearConsentimiento(texto) {
     const limpia = linea.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim();
     if (!limpia) continue;
 
-    const conEtiqueta = limpia.match(/^(.{2,60}?)\s*[:=]\s*(.+)$/);
-    if (conEtiqueta) {
-      const campo = campoDe(conEtiqueta[1]);
-      if (campo) asignar(campo, conEtiqueta[2]);
-      continue;
-    }
+    if (leerLinea(limpia, asignar)) continue;
 
-    // Sin dos puntos: "Cédula/ID del representante legal 1725617730". Pasa a
-    // menudo cuando el representante reescribe a mano solo lo que le faltaba, y
-    // antes se perdía el dato entero.
-    if (asignarSinSeparador(limpia, asignar)) continue;
-
-    // Línea suelta: solo puede ser el sí o el no.
+    // Línea suelta sin etiqueta: solo puede ser el sí o el no.
     const si = interpretarSiNo(limpia);
     if (si !== null) datos.otorgado ??= si;
-  }
-
-  // "Nombres del estudiante: Juan Sebastián Pérez Loor": etiqueta de nombres
-  // pero valor con el nombre entero. Si no llegaron apellidos por separado se
-  // reparte aquí, en vez de pedirle al representante un dato que ya escribió.
-  // Con dos palabras no se toca: no hay forma de saber si "Juan Sebastián" son
-  // dos nombres o un nombre y un apellido.
-  for (const grupo of ['representante', 'representado']) {
-    const persona = datos[grupo];
-    if (!persona.apellidos && persona.nombres.split(/\s+/).filter(Boolean).length >= 3) {
-      const partido = partirNombre(persona.nombres);
-      persona.nombres = partido.nombres;
-      persona.apellidos = partido.apellidos;
-    }
   }
 
   // Una negativa escrita en cualquier parte del correo manda sobre todo lo demás.
@@ -234,8 +209,8 @@ export function parsearConsentimiento(texto) {
 export function acumularConsentimiento(textos) {
   const total = {
     otorgado: null,
-    representante: { nombres: '', apellidos: '', cedula: '' },
-    representado: { nombres: '', apellidos: '', cedula: '' },
+    representante: { nombre: '', cedula: '' },
+    representado: { nombre: '', cedula: '' },
     parentesco: '',
     solicitud: { institucion: '', ciudad: '', provincia: '', grado: '', paralelo: '' },
     textoOriginal: '',
@@ -247,7 +222,7 @@ export function acumularConsentimiento(textos) {
     if (datos.otorgado !== null) total.otorgado = datos.otorgado;
     if (datos.parentesco) total.parentesco = datos.parentesco;
     for (const grupo of ['representante', 'representado']) {
-      for (const campo of ['nombres', 'apellidos', 'cedula']) {
+      for (const campo of ['nombre', 'cedula']) {
         if (datos[grupo][campo]) total[grupo][campo] = datos[grupo][campo];
       }
     }
@@ -270,22 +245,20 @@ export function validarConsentimiento(datos) {
   const faltan = [];
 
   if (datos.otorgado !== true) faltan.push('La palabra "Sí" para autorizar');
+  if (!datos.representante.nombre) faltan.push('Nombre y Apellido Representante Legal');
 
-  if (!datos.representante.nombres || !datos.representante.apellidos) {
-    faltan.push('Nombre y Apellido Representante Legal');
-  }
   const docRep = validarDocumento(datos.representante.cedula);
   if (docRep.error) faltan.push(`Cédula Representante Legal (${docRep.error})`);
 
-  if (!datos.representado.nombres || !datos.representado.apellidos) {
-    faltan.push('Nombre y Apellidos del estudiante');
-  }
+  if (!datos.representado.nombre) faltan.push('Nombre y Apellidos del estudiante');
   if (!datos.parentesco) faltan.push('Parentesco');
 
-  // Datos necesarios para localizar las credenciales. Ciudad y Provincia se
-  // piden en el correo pero NO bloquean: mucha gente no sabe de memoria el
-  // cantón o la provincia del colegio, y exigirlos reproduciría el bucle de
-  // preguntas que el flujo acaba de dejar atrás. Si los dan, se registran.
+  // Datos necesarios para localizar las credenciales.
+  //
+  // La ciudad y la provincia NO se piden en el primer contacto: solo sirven para
+  // desempatar cuando hay colegios con el mismo nombre, y exigírselas a todo el
+  // mundo alarga cada caso para resolver unos pocos. Si la búsqueda devuelve
+  // varias coincidencias, el asistente las pide entonces.
   if (!datos.solicitud.institucion) faltan.push('Unidad Educativa');
   if (!datos.solicitud.grado) faltan.push('Grado');
   if (!datos.solicitud.paralelo) faltan.push('Paralelo');
@@ -307,8 +280,6 @@ const CAMPOS_PEDIDOS =
   'Nombre y Apellidos del estudiante:\n' +
   'Parentesco:\n' +
   'Unidad Educativa:\n' +
-  'Ciudad:\n' +
-  'Provincia:\n' +
   'Grado:\n' +
   'Paralelo:';
 
@@ -389,8 +360,8 @@ export function textoRechazo() {
     'Estimado/a usuario/a:\n\n' +
     'Hemos registrado que **no otorga el consentimiento** para el tratamiento automatizado de los ' +
     'datos. Respetamos su decisión y **no procesaremos su solicitud por medios automáticos**.\n\n' +
-    'Su solicitud será atendida **directamente por un agente** de nuestro equipo, que le responderá ' +
-    'por este mismo correo en un plazo de **48 a 52 horas**.'
+    'Su solicitud será atendida **directamente por un agente** de nuestro equipo, mediante un proceso ' +
+    'de **verificación manual** cuyo tiempo de respuesta **puede superar las 72 horas**.'
   );
 }
 
@@ -411,7 +382,8 @@ export function textoDelegacionPorNoAceptar() {
     '- Qué necesita exactamente y para qué\n' +
     '- Desde cuándo tiene el problema y qué mensaje de error ve, si aplica\n' +
     '- Nombre del estudiante, unidad educativa, grado y paralelo' + '\n\n' +
-    'Un agente le responderá por este mismo correo en un plazo de **48 a 52 horas**.' + '\n\n' +
+    'Le responderemos por este mismo correo mediante un proceso de **verificación manual**, cuyo tiempo ' +
+    'de respuesta **puede superar las 72 horas**.' + '\n\n' +
     'Si prefiere la atención **inmediata y automática**, puede enviarnos el consentimiento en ' +
     'cualquier momento.'
   );
@@ -435,15 +407,16 @@ export async function registrarConsentimiento({ datos, remitente, hiloId, mensaj
     hora,
     zonaHoraria: ZONA,
     otorgadoEn: ahora,
+    // El nombre va ENTERO en un solo campo, como lo pide el formulario. Partirlo
+    // en nombres y apellidos obligaba a adivinar dónde acaba uno y empieza el
+    // otro, y con dos nombres y un apellido —o al revés— se equivocaba.
     representante: {
-      nombres: datos.representante.nombres,
-      apellidos: datos.representante.apellidos,
+      nombre: datos.representante.nombre,
       cedula: validarDocumento(datos.representante.cedula).valor || '',
       correo: extraerEmail(remitente),
     },
     representado: {
-      nombres: datos.representado.nombres,
-      apellidos: datos.representado.apellidos,
+      nombre: datos.representado.nombre,
       // El registro ya no exige la cédula del representado; se guarda solo si
       // el representante la aportó por su cuenta.
       cedula: validarDocumento(datos.representado.cedula).valor || '',
@@ -538,11 +511,9 @@ export async function procesarRespuestaConsentimiento({ conversacion, hiloId, me
 export const COLUMNAS_REPORTE = [
   'Fecha',
   'Hora',
-  'Nombre (Representante legal)',
-  'Apellido (Representante legal)',
+  'Nombre y Apellido (Representante legal)',
   'Cédula (Representante legal)',
-  'Nombres (Representado)',
-  'Apellidos (Representado)',
+  'Nombres y Apellidos (Representado)',
   'Parentesco',
   'Finalidad del Consentimiento',
   '¿Otorgado?',
@@ -552,11 +523,9 @@ function fila(r) {
   return [
     r.fecha || '',
     r.hora || '',
-    r.representante?.nombres || '',
-    r.representante?.apellidos || '',
+    r.representante?.nombre || '',
     r.representante?.cedula || '',
-    r.representado?.nombres || '',
-    r.representado?.apellidos || '',
+    r.representado?.nombre || '',
     r.parentesco || '',
     r.finalidad || '',
     r.otorgado ? 'Sí' : 'No',
@@ -640,8 +609,7 @@ export async function delegarConsentimientosVencidos({ horas } = {}) {
     const parcial = acumularConsentimiento(
       (conv.mensajes || []).filter((m) => m.rol === 'usuario').map((m) => String(m.cuerpo || ''))
     );
-    const nombreEstudiante = [parcial.representado.nombres, parcial.representado.apellidos]
-      .filter(Boolean).join(' ');
+    const nombreEstudiante = parcial.representado.nombre;
     const institucion = [parcial.solicitud.institucion, parcial.solicitud.ciudad, parcial.solicitud.provincia]
       .filter(Boolean).join(', ');
     const grados = [parcial.solicitud.grado && `Grado: ${parcial.solicitud.grado}`,
@@ -662,7 +630,7 @@ export async function delegarConsentimientosVencidos({ horas } = {}) {
         descripcionDetallada:
           'El representante NO envió el consentimiento dentro del plazo, así que la identidad NO se ' +
           'validó automáticamente: verifícala tú antes de entregar nada. Atiende su solicitud ' +
-          'directamente (SLA 48–52 h).\n\nLO QUE ESCRIBIÓ EL CLIENTE:\n' +
+          'directamente (el tiempo de respuesta puede superar las 72 h).\n\nLO QUE ESCRIBIÓ EL CLIENTE:\n' +
           resumenSolicitud(conv),
         datosEstudiante: [nombreEstudiante, grados].filter(Boolean).join(' — ') || 'no proporcionado',
         datosInstitucion: institucion || 'no proporcionado',

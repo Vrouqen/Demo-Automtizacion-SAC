@@ -76,15 +76,16 @@ Antes de atender la primera solicitud, el cerebro exige el consentimiento. El fl
 
 1. El cliente escribe pidiendo ayuda. El cerebro, si no tiene consentimiento registrado, responde con
    el **correo de política** y deja el hilo en `esperando_consentimiento`. No atiende la solicitud aún.
-2. El representante responde con **"Sí"** y un formulario de diez campos: sus nombres, apellidos y
-   cédula, el parentesco, nombres y apellidos **del estudiante**, y los datos del colegio (unidad
-   educativa, ciudad, provincia, grado y paralelo). Con todo completo y válido se crea el registro y
-   se **atiende la solicitud original** sin volver a preguntar nada.
+2. El representante responde con **"Sí"** y un formulario de ocho campos: su nombre y apellido (en un
+   solo campo) y su cédula, el parentesco, el nombre del **estudiante**, y los datos del colegio
+   (unidad educativa, grado y paralelo). Con todo completo y válido se crea el registro y se
+   **atiende la solicitud original** sin volver a preguntar nada. La ciudad y la provincia no se
+   piden aquí: solo se solicitan si la búsqueda devuelve varias coincidencias.
 3. Si responde **a medias**, se le piden solo los campos que faltan. Si **niega**, la negativa queda
    registrada (`otorgado: false`) y su solicitud pasa a un agente humano.
 4. Si **no responde** dentro del plazo (`CONSENTIMIENTO_HORAS`, por defecto 48 h), un job programado de
    n8n (`workflow-consentimiento-vencido.json`) **delega su solicitud a un agente humano** (mismo
-   viaje de vuelta que un caso) y le avisa que será atendido en **48 a 52 horas**.
+   viaje de vuelta que un caso) y le avisa que se atenderá por **verificación manual**, que puede superar las **72 horas**.
 
 La cédula del representante se valida con su **dígito verificador** (módulo 10); se aceptan pasaporte
 y documento extranjero marcados como no verificados. La del estudiante ya no se pide. El registro guarda además el **texto literal** de
@@ -97,7 +98,7 @@ por dirección y dura `CONSENTIMIENTO_VIGENCIA_DIAS`. Se puede desactivar todo c
 `CONSENTIMIENTO_HABILITADO=false`.
 
 El reporte para auditoría sale de `?reporte=consentimientos` (con `&formato=csv` para descargarlo),
-con las diez columnas exigidas en su orden.
+con las ocho columnas exigidas en su orden.
 
 ## 3c. Cola de correos sin cuota de IA
 

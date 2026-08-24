@@ -354,6 +354,83 @@ const responder = async (event) => {
       });
     }
 
+    // Eliminar estudiantes de un colegio.
+    //
+    // Se borra SOLO lo que el usuario tenía delante: se identifica cada registro
+    // por periodo + plataforma + login, que es exactamente una fila de la tabla
+    // de resultados. No se acepta borrar "todo un grado" ni "todo un colegio":
+    // una operación así, mal disparada, deja sin acceso a cientos de personas.
+    if (metodo === 'POST' && query.eliminar) {
+      const cuerpo = JSON.parse(
+        event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : event.body || '{}'
+      );
+      const { colegioId, periodo } = cuerpo;
+      const objetivos = Array.isArray(cuerpo.estudiantes) ? cuerpo.estudiantes : [];
+
+      if (!colegioId || !periodo) {
+        return respuestaJson(400, { error: 'Faltan el colegio y el periodo' });
+      }
+      if (objetivos.length === 0) {
+        return respuestaJson(400, { error: 'No se indicó ningún estudiante a eliminar' });
+      }
+      // Tope igual al de una página de resultados: si llega más, no viene de la
+      // pantalla sino de una llamada armada a mano.
+      if (objetivos.length > 100) {
+        return respuestaJson(400, { error: 'No se pueden eliminar más de 100 registros a la vez' });
+      }
+
+      const col = await coleccionColegios();
+      const doc = await col.findOne({ _id: colegioId }, { projection: { nombre: 1, estudiantes: 1 } });
+      if (!doc) return respuestaJson(404, { error: 'Colegio no encontrado' });
+
+      // Clave de una fila de la tabla. El login va cifrado en la base, así que
+      // se descifra para compararlo con lo que la pantalla mostró.
+      const clave = (plataforma, login) => `${String(plataforma || '')}|${String(login || '')}`;
+      const aBorrar = new Set(objetivos.map((o) => clave(o.plataforma, o.login)));
+
+      const quedan = [];
+      const eliminados = [];
+      for (const e of doc.estudiantes || []) {
+        const coincide =
+          e.periodo === periodo && aBorrar.has(clave(e.plataforma, descifrar(e.login, config.cifrado.clave)));
+
+        if (coincide) {
+          // Se devuelve QUÉ se borró, nunca la contraseña: sirve para dejar
+          // constancia y para que la pantalla confirme lo ocurrido.
+          eliminados.push({
+            nombreCompleto: e.nombreCompleto || [e.nombre, e.apellidos].filter(Boolean).join(' '),
+            grado: e.grado,
+            grupo: e.grupo,
+            plataforma: e.plataforma,
+          });
+        } else {
+          quedan.push(e);
+        }
+      }
+
+      if (eliminados.length === 0) {
+        return respuestaJson(404, {
+          error: 'No se encontró ninguno de esos estudiantes en el periodo indicado',
+          eliminados: 0,
+        });
+      }
+
+      await col.updateOne({ _id: colegioId }, { $set: { estudiantes: quedan, actualizadoEn: new Date() } });
+
+      console.log(
+        `[eliminar] colegio=${colegioId} periodo=${periodo} borrados=${eliminados.length} ` +
+          `restantes=${quedan.length}`
+      );
+
+      return respuestaJson(200, {
+        colegio: { id: doc._id, nombre: doc.nombre },
+        periodo,
+        eliminados: eliminados.length,
+        detalle: eliminados,
+        restantes: quedan.length,
+      });
+    }
+
     if (!event.body) {
       return respuestaJson(400, { error: 'Falta el body de la solicitud' });
     }
