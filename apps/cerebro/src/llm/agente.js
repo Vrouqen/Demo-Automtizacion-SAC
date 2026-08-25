@@ -15,7 +15,12 @@ import { limpiarCuerpoCorreo, textoAHtml, extraerEmail } from '../utils/correo.j
 import { conFirmaTexto } from '../utils/firma.js';
 import { clasificarCorreoBasura } from '../utils/clasificacion.js';
 import { esCorreoInterno } from '../config.js';
-import { yaConsintio, procesarRespuestaConsentimiento, textoPolitica } from '../services/consentimiento.js';
+import {
+  yaConsintio,
+  procesarRespuestaConsentimiento,
+  textoPolitica,
+  referenciaSoporte,
+} from '../services/consentimiento.js';
 import { encolar, desencolar } from '../services/cola.js';
 
 const MAX_ITERACIONES_TOOLS = 6;
@@ -236,8 +241,9 @@ const TOOLS = [
   {
     name: 'info_pin',
     description:
-      'Devuelve un mini tutorial de dónde encontrar el PIN de acceso del libro de "Compartir". ' +
-      'Úsala para CUALQUIER consulta sobre el PIN.',
+      'Responde CUALQUIER consulta sobre el PIN de acceso a EDI: dónde viene, qué hacer si se ' +
+      'extravió o si no llegó en la cartilla. El texto de la respuesta lo genera el sistema; no lo ' +
+      'reescribas ni añadas pasos por tu cuenta.',
     parametersJsonSchema: {
       type: 'object',
       properties: {
@@ -373,11 +379,11 @@ Cuando tengas los datos, SIEMPRE genera el ticket (crear_ticket, tipo "reset_pas
 que se generó el ticket, con su código real, y que la respuesta llegará a este mismo correo.
 
 ## 3. PIN de acceso
-Cualquier consulta sobre el PIN se responde con el mini tutorial que devuelve info_pin: explica al
-usuario, paso a paso, dónde encontrarlo (está impreso en el reverso del libro de "Compartir").
-Preséntalo como una lista numerada de pasos. Usa pin_no_funciona=false si solo preguntan dónde está,
-y pin_no_funciona=true si reportan que no les funciona (en ese caso agrega la nota que devuelve la
-herramienta). No inventes otros pasos ni prometas validar el PIN: no hay forma automática de hacerlo.
+Cualquier consulta sobre el PIN se responde llamando a info_pin. El texto lo redacta el sistema, con
+la respuesta oficial de Santillana: qué es el PIN, que viene en la cartilla con el material, y a qué
+correo escribir para una reposición si se extravió. NO lo reescribas, no resumas y no añadas pasos
+—como mirar la contraportada del libro—: esa información ya no es correcta. Usa pin_no_funciona=true
+si reportan que el PIN no les sirve, solo para dejarlo registrado.
 
 ## 4. Incidencias de plataforma
 Si reportan que no ven contenido, no ven sus clases, o algo similar, usa crear_ticket (tipo
@@ -739,19 +745,10 @@ async function ejecutarTool(nombre, args, contexto) {
           tipo: 'pin_info',
           detalle: { pinNoFunciona: Boolean(args.pin_no_funciona) },
         });
-        // Toda consulta de PIN se resuelve con este mini tutorial de dónde
-        // encontrarlo. No hay forma automática de validar un PIN.
-        return {
-          tutorial: [
-            'Toma el libro de "Compartir" del estudiante.',
-            'Voltea el libro y revisa el reverso (la contraportada).',
-            'Ahí está impreso el PIN de acceso.',
-            'Ingresa ese PIN en la plataforma para activar el libro.',
-          ],
-          nota: args.pin_no_funciona
-            ? 'Si después de seguir estos pasos el PIN sigue sin funcionar, pide al usuario que responda a este mismo correo indicándolo, para revisarlo manualmente.'
-            : null,
-        };
+        // El texto lo redacta la plantilla, no el modelo: es una respuesta fija
+        // de Santillana que incluye a dónde escribir para una reposición, y no
+        // debe reformularse en cada correo.
+        return { pin: true, pinNoFunciona: Boolean(args.pin_no_funciona) };
       }
       case 'fuera_de_alcance': {
         await registrarEvento(contexto.hiloId, { tipo: 'fuera_de_alcance', detalle: {} });
@@ -814,7 +811,7 @@ export function prometeAccionNoRealizada(texto, contexto) {
  * credenciales/estudiantes, resultados con error): en esos casos interpretar
  * el resultado y decidir qué preguntar es justo donde el LLM aporta calidad.
  */
-export function redactarRespuestaDeterminista(nombre, resultado) {
+export function redactarRespuestaDeterminista(nombre, resultado, hiloId = '') {
   if (!resultado || resultado.error) return null;
 
   // Faltan datos para crear el ticket / derivar el caso: la respuesta es la
@@ -834,14 +831,18 @@ export function redactarRespuestaDeterminista(nombre, resultado) {
 
   switch (nombre) {
     case 'info_pin': {
-      if (!Array.isArray(resultado.tutorial) || resultado.tutorial.length === 0) return null;
-      const pasos = resultado.tutorial.map((p, i) => `${i + 1}. ${p}`).join('\n');
+      if (!resultado.pin) return null;
       return (
-        'Gracias por escribirnos. Aquí tienes los pasos para encontrar el PIN de acceso:\n\n' +
-        pasos +
-        (resultado.nota ? `\n\n${resultado.nota}` : '') +
-        '\n\nSi necesitas algo más, puedes responder a este mismo correo.' +
-        FIRMA
+        'Reciba un cordial saludo,\n\n' +
+        'Le saludamos de Soporte Santillana Ecuador, su requerimiento está siendo atendido en la ' +
+        `incidencia **${referenciaSoporte(hiloId)}**.\n\n` +
+        'El pin de acceso es la **llave digital que le permite el acceso a EDI**; dicho código viene ' +
+        'adjunto en una **cartilla** al momento de adquirir el material correspondiente a su ' +
+        'institución educativa.\n\n' +
+        'En caso de que haya **extraviado el código** o **no le haya venido en su cartilla**, es ' +
+        'necesario que envíe un correo a **servicioalclienteec@santillana.com** mencionando este ' +
+        'particular; desde allí le indicarán los pasos a seguir para generar una reposición. Es ' +
+        'importante que adjunte la **factura de compra** y los **datos del estudiante**.'
       );
     }
     case 'crear_ticket': {
@@ -1232,7 +1233,7 @@ export async function procesarCorreo({
       // desenlace determinista, se redacta la respuesta con plantilla y se
       // evita la llamada extra a Gemini (que solo formatearía un dato fijo).
       if (respuesta.functionCalls.length === 1) {
-        const plantilla = redactarRespuestaDeterminista(respuesta.functionCalls[0].name, ultimoResultado);
+        const plantilla = redactarRespuestaDeterminista(respuesta.functionCalls[0].name, ultimoResultado, hiloId);
         if (plantilla) {
           textoFinal = plantilla;
           break;
@@ -1277,7 +1278,7 @@ export async function procesarCorreo({
         contents.push({ role: 'user', parts: partes });
 
         if (respuesta.functionCalls.length === 1) {
-          const plantilla = redactarRespuestaDeterminista(respuesta.functionCalls[0].name, ultimo);
+          const plantilla = redactarRespuestaDeterminista(respuesta.functionCalls[0].name, ultimo, hiloId);
           if (plantilla) {
             respuesta = { text: plantilla, functionCalls: [] };
             break;
