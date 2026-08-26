@@ -36,6 +36,22 @@ const CONFIDENCIALIDAD = [
   'Agradecemos su amable atención.',
 ];
 
+/**
+ * Ancho máximo del correo, en píxeles.
+ *
+ * Los banners de EDI miden 885 px de origen. Mostrándolos por DEBAJO de esa
+ * medida la imagen se reduce, y reducir siempre se ve nítido; dejándolos crecer
+ * hasta el ancho del panel se ampliaban e interpolaban, que era la causa de que
+ * se vieran borrosos.
+ *
+ * 600 px es además el ancho clásico de correo: da un margen de 1,48x sobre el
+ * archivo, suficiente para que aguante el escalado de pantalla de Windows.
+ *
+ * No es una anchura FIJA: en pantallas estrechas el correo se encoge por debajo
+ * de este número. Solo marca el techo.
+ */
+export const ANCHO_MAXIMO_CORREO = 600;
+
 /** Tipografía del correo: Arial 10, como pide la guía de marca. */
 export const TIPOGRAFIA_CORREO = "font-family:Arial,Helvetica,sans-serif;font-size:10pt;line-height:1.5;color:#222222;";
 
@@ -138,14 +154,14 @@ export const LOGOS = [
   // tal como viene del archivo original (204x64). Sustituye a logo-santillana en
   // la firma; ese sigue disponible por separado para otros usos.
   { cid: 'logo-santillana-gptw', alt: 'Santillana · Great Place To Work Certified', archivo: 'santillana-gptw.png', ancho: 200, alto: 63 },
-  // Banners de EDI. `bloque: true` los hace FLUIDOS: ocupan el 100 % del ancho
-  // disponible y calculan su alto solos, así que se reajustan al zoom y al ancho
-  // del panel. `ancho`/`alto` quedan solo como referencia del tamaño natural del
+  // Banners de EDI. `bloque: true` los hace FLUIDOS: ocupan el ancho del
+  // contenedor y calculan su alto solos, así que se reajustan al zoom y al ancho
+  // de la ventana. `ancho`/`alto` quedan como referencia del tamaño natural del
   // archivo (885x98); el render no los usa.
   //
-  // Que el archivo sea de 885 px y no de 566 es lo que los mantiene nítidos: con
-  // el de 566, que se mostraba a su tamaño exacto, el escalado de pantalla de
-  // Windows (125-150 %) lo ampliaba e interpolaba, y por eso se veía borroso.
+  // La nitidez sale de que ese contenedor tiene TECHO (ANCHO_MAXIMO_CORREO): a
+  // 600 px la imagen de 885 se reduce, y reducir se ve limpio. Sin techo crecía
+  // hasta el ancho del panel, se ampliaba e interpolaba, y de ahí lo borroso.
   { cid: 'banner-edi-cabecera', alt: 'EDI · Ecosistema Digital Integrado 2.0', archivo: 'banner-edi-grande.png', ancho: 885, alto: 98, bloque: true },
   { cid: 'banner-edi-pie', alt: 'Consultas: servicioalclienteec@santillana.com o 1 800 212 000', archivo: 'banner-edi-pie-grande.png', ancho: 885, alto: 98, bloque: true },
 ];

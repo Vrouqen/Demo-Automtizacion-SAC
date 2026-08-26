@@ -12,6 +12,7 @@ import {
   bannerCabeceraHtml,
   bannerPieHtml,
   TIPOGRAFIA_CORREO,
+  ANCHO_MAXIMO_CORREO,
 } from './firma.js';
 
 const ENTIDADES = {
@@ -189,16 +190,19 @@ export function textoAHtml(texto, { firma = true } = {}) {
   // lo que alinearlos y una anchura fija solo estorbaría al leerlos.
   if (!firma) return contenido;
 
-  // Contenedor a ANCHO COMPLETO. No se fija ninguna anchura en píxeles: el
-  // correo ocupa el panel de lectura entero y los banners, que son fluidos, lo
-  // acompañan. Así, al ampliar el zoom o estrechar la ventana, la imagen se
-  // reajusta sola en vez de quedarse clavada a un tamaño.
+  // Contenedor con TECHO de anchura, no anchura fija.
   //
-  // Va en TABLA y no en un div porque Outlook de escritorio usa el motor de
-  // Word, que trata los div sueltos de forma poco predecible dentro del cuerpo.
+  // Sigue siendo fluido —en pantallas estrechas se encoge con todo dentro—, pero
+  // no pasa de ANCHO_MAXIMO_CORREO. Ese tope es lo que mantiene nítidos los
+  // banners: por debajo de su tamaño de origen la imagen se reduce, y reducir se
+  // ve limpio; dejándola crecer se amplía e interpola.
+  //
+  // El atributo `width` va en píxeles y el `max-width` en el estilo: Outlook de
+  // escritorio (motor de Word) ignora max-width y usa el atributo, mientras que
+  // los demás clientes aplican el CSS y se encogen cuando hace falta.
   return (
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ' +
-    'style="width:100%;border-collapse:collapse;">' +
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="${ANCHO_MAXIMO_CORREO}" ` +
+    `style="width:100%;max-width:${ANCHO_MAXIMO_CORREO}px;border-collapse:collapse;">` +
     `<tr><td style="padding:0;">${contenido}</td></tr></table>`
   );
 }

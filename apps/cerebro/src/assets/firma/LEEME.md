@@ -65,10 +65,16 @@ ninguna etiqueta `<img>`: es preferible una firma sobria a una con cuadros rotos
 | `banner-edi-pie-grande.png` | Banner EDI de contacto con QR | 885×98 | **Fluido**: 100 % del ancho |
 | `santillana-gptw.png` | Santillana + sello Great Place To Work | 204×64 | Fijo, 200×63 |
 
-Los banners son **fluidos**: ocupan todo el ancho disponible y calculan su alto
+Los banners son **fluidos**: ocupan el ancho del contenedor y calculan su alto
 solos (`width:100%; height:auto`, sin atributo `height`). Es el "ajuste
 automático" de Outlook — al ampliar el zoom o estrechar la ventana, la imagen
 acompaña en vez de quedarse clavada.
+
+Ese contenedor tiene un **techo de 600 px** (`ANCHO_MAXIMO_CORREO` en
+`utils/firma.js`). Ahí está la nitidez: un archivo de 885 px mostrado a 600 se
+**reduce**, y reducir siempre se ve limpio. Sin techo crecía hasta el ancho del
+panel de lectura, se ampliaba e interpolaba, y por eso se veía borroso. Si algún
+día llegan banners de más resolución, se puede subir ese número.
 
 Los logos de la firma NO son fluidos: son pequeños y estirarlos solo los haría
 borrosos.
