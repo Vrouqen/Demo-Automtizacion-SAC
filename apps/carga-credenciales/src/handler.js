@@ -354,6 +354,89 @@ const responder = async (event) => {
       });
     }
 
+    // Editar UN estudiante.
+    //
+    // Se identifica por plataforma + usuario actual dentro del periodo, que es
+    // exactamente una fila de la tabla de resultados. Solo se tocan los campos
+    // que vienen en la petición: el resto del registro queda intacto.
+    if (metodo === 'POST' && query.editar) {
+      const cuerpo = JSON.parse(
+        event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : event.body || '{}'
+      );
+      const { colegioId, periodo, plataforma, login, cambios } = cuerpo;
+
+      if (!colegioId || !periodo || !login) {
+        return respuestaJson(400, { error: 'Faltan el colegio, el periodo o el usuario a editar' });
+      }
+      if (!cambios || typeof cambios !== 'object') {
+        return respuestaJson(400, { error: 'No se indicó ningún cambio' });
+      }
+
+      const col = await coleccionColegios();
+      const doc = await col.findOne({ _id: colegioId }, { projection: { nombre: 1, estudiantes: 1 } });
+      if (!doc) return respuestaJson(404, { error: 'Colegio no encontrado' });
+
+      const mismaFila = (e) =>
+        e.periodo === periodo &&
+        String(e.plataforma || '') === String(plataforma || '') &&
+        descifrar(e.login, config.cifrado.clave) === String(login);
+
+      const indice = (doc.estudiantes || []).findIndex(mismaFila);
+      if (indice === -1) {
+        return respuestaJson(404, { error: 'No se encontró ese estudiante en el periodo indicado' });
+      }
+
+      const actual = doc.estudiantes[indice];
+      const texto = (v) => (typeof v === 'string' ? v.trim() : '');
+      const actualizado = { ...actual };
+
+      // Nombre: se guarda entero y se recalcula el normalizado, que es el que
+      // usa la búsqueda. Sin recalcularlo, el estudiante seguiría apareciendo
+      // bajo su nombre viejo.
+      const nombreNuevo = texto(cambios.nombreCompleto);
+      if (nombreNuevo) {
+        actualizado.nombreCompleto = nombreNuevo;
+        actualizado.nombreNormalizado = normalizar(nombreNuevo);
+      }
+
+      if (texto(cambios.grado)) actualizado.grado = texto(cambios.grado);
+      if (texto(cambios.grupo)) actualizado.grupo = texto(cambios.grupo);
+
+      if (texto(cambios.plataforma)) {
+        const nueva = normalizar(cambios.plataforma);
+        if (!config.plataformasPermitidas.includes(nueva)) {
+          return respuestaJson(400, {
+            error: `Plataforma "${cambios.plataforma}" no permitida. Solo: ${config.plataformasPermitidas.join(', ')}`,
+          });
+        }
+        actualizado.plataforma = nueva;
+      }
+
+      // Credenciales: se vuelven a cifrar. Nunca se guardan en claro.
+      if (texto(cambios.login)) actualizado.login = cifrar(texto(cambios.login), config.cifrado.clave);
+      if (texto(cambios.contrasena)) actualizado.contrasena = cifrar(texto(cambios.contrasena), config.cifrado.clave);
+
+      const estudiantes = [...doc.estudiantes];
+      estudiantes[indice] = actualizado;
+      await col.updateOne({ _id: colegioId }, { $set: { estudiantes, actualizadoEn: new Date() } });
+
+      console.log(`[editar] colegio=${colegioId} periodo=${periodo} usuario=${login}`);
+
+      return respuestaJson(200, {
+        colegio: { id: doc._id, nombre: doc.nombre },
+        // Se devuelve el registro ya actualizado —sin la contraseña cifrada—
+        // para que la pantalla refresque la fila sin volver a consultar.
+        estudiante: {
+          nombreCompleto: actualizado.nombreCompleto,
+          grado: actualizado.grado,
+          grupo: actualizado.grupo,
+          plataforma: actualizado.plataforma,
+          login: descifrar(actualizado.login, config.cifrado.clave),
+          contrasena: descifrar(actualizado.contrasena, config.cifrado.clave),
+        },
+      });
+    }
+
     // Eliminar estudiantes de un colegio.
     //
     // Se borra SOLO lo que el usuario tenía delante: se identifica cada registro

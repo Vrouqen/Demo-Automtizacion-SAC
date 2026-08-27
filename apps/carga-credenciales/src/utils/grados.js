@@ -36,6 +36,19 @@ const ORDINALES = {
   decimo: 10, decima: 10, diez: 10,
 };
 
+/**
+ * Cómo se escribe cada etapa en los Excel de los colegios.
+ *
+ * Las siglas van con límite de palabra: sin él, "bt" casaría dentro de
+ * cualquier palabra que la contenga y colocaría mal el grado.
+ *
+ * Bachillerato cubre todas sus variantes —general (BGU), técnico (BT) e
+ * internacional (BI)—, porque para ordenar solo importa la etapa y el año: un
+ * "1ro BT" va junto a un "1ro BGU", no al final de la lista.
+ */
+const RE_BASICA = /\bbasica\b|\begb\b|\bb\b\s*\d/;
+const RE_BACHILLERATO = /bachillerato|\bbgu\b|\bbt\b|\bbi\b|\btecnico\b/;
+
 /** Número del grado: el dígito si lo trae, si no el ordinal en letra. */
 function numeroDe(etiquetaNormalizada) {
   const digito = etiquetaNormalizada.match(/\d+/);
@@ -56,8 +69,8 @@ export function ordenGrado(etiqueta) {
   if (!texto) return DESCONOCIDO;
 
   if (texto.includes('inicial')) return INICIAL + numeroDe(texto);
-  if (texto.includes('basica') || texto.includes('egb')) return BASICA + numeroDe(texto);
-  if (texto.includes('bachillerato') || texto.includes('bgu')) return BACHILLERATO + numeroDe(texto);
+  if (RE_BASICA.test(texto)) return BASICA + numeroDe(texto);
+  if (RE_BACHILLERATO.test(texto)) return BACHILLERATO + numeroDe(texto);
 
   return DESCONOCIDO;
 }

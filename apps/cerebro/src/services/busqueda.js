@@ -126,22 +126,38 @@ export async function buscarEstudiante({ nombreCompleto, nivel, paralelo, colegi
     };
   }
 
-  // Filtro suave por nivel/grado y paralelo/grupo: si el filtro vacía la
-  // lista, se ignora (los datos del Excel pueden variar en formato).
-  const filtrar = (lista, campo, valor) => {
-    if (!valor) return lista;
+  // El grado y el paralelo NO filtran: solo suman puntos.
+  //
+  // Filtrarlos descartaba al estudiante correcto cuando el usuario los escribe
+  // de otra forma que el Excel, que es casi siempre. Un caso real: el padre puso
+  // paralelo "Contabilidad" y en la base figura "Gestion Financiera y Contable";
+  // el filtro dejó fuera a su hija y dentro a 259 alumnos de otros paralelos, así
+  // que ni siquiera se activó el respaldo de "si vacía la lista, ignórala".
+  //
+  // Como bonificación cumplen su papel —desempatar entre homónimos— sin poder
+  // esconder a nadie: el nombre sigue mandando.
+  const coincideCampo = (e, campo, valor) => {
+    if (!valor) return false;
+    const c = normalizar(e[campo]);
     const v = normalizar(valor);
-    const filtrada = lista.filter((e) => {
-      const c = normalizar(e[campo]);
-      return c && (c.includes(v) || v.includes(c) || similitudDice(c, v) >= 0.6);
-    });
-    return filtrada.length > 0 ? filtrada : lista;
+    if (!c || !v) return false;
+    if (c.includes(v) || v.includes(c) || similitudDice(c, v) >= 0.6) return true;
+    // "Contabilidad" contra "Gestion Financiera y Contable": basta con que
+    // compartan una palabra con raíz común.
+    const palabras = (t) => t.split(/[^a-z0-9ñ]+/).filter((w) => w.length >= 4);
+    return palabras(v).some((a) => palabras(c).some((b) => a.startsWith(b.slice(0, 5)) || b.startsWith(a.slice(0, 5))));
   };
-  estudiantes = filtrar(estudiantes, 'grado', nivel);
-  estudiantes = filtrar(estudiantes, 'grupo', paralelo);
+
+  const BONIFICACION = 0.05;
 
   const puntuados = estudiantes
-    .map((e) => ({ est: e, score: similitudNombres(nombreCompleto, e.nombreCompleto) }))
+    .map((e) => ({
+      est: e,
+      score:
+        similitudNombres(nombreCompleto, e.nombreCompleto) +
+        (coincideCampo(e, 'grado', nivel) ? BONIFICACION : 0) +
+        (coincideCampo(e, 'grupo', paralelo) ? BONIFICACION : 0),
+    }))
     .sort((a, b) => b.score - a.score);
 
   const mejor = puntuados[0];

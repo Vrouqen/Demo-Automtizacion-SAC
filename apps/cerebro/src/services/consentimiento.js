@@ -238,6 +238,71 @@ export function acumularConsentimiento(textos) {
 }
 
 /**
+ * Cuando falta UN SOLO dato y el representante responde a secas —"0928331404",
+ * "El paralelo es el A"—, se toma esa respuesta como el dato pedido.
+ *
+ * Sin esto, un correo sin etiqueta no aportaba nada: se conservaba el valor
+ * anterior y se le repetía el MISMO error, incluso citando la cédula vieja que
+ * él acababa de corregir. Es un bucle del que el usuario no tiene forma de
+ * salir, porque está respondiendo exactamente lo que se le pidió.
+ *
+ * Solo actúa con un único campo pendiente: con dos o más no habría manera de
+ * saber a cuál corresponde lo que escribió.
+ */
+const RE_SALTO = new RegExp(String.fromCharCode(13) + '?' + String.fromCharCode(10));
+const RE_VINETA = /^[\s\-*•]+/;
+const RE_NUMERO = /\d[\d.\-\s]{3,14}/;
+const RE_NO_DIGITO = /[^0-9]/g;
+const RE_CORTESIA = /^(gracias|hola|buen(os|as)|saludos|listo|ok|de acuerdo|correcto|s[ií])\b/i;
+const RE_TRAS_VERBO = /(?:es|son)\s+(?:el|la|los|las)?\s*(.+)$/i;
+
+export function completarCampoSuelto(datos, faltan, textoReciente) {
+  if (faltan.length !== 1) return false;
+
+  // Se queda con las líneas cortas, que es donde cabe una respuesta suelta; el
+  // resto suele ser la firma corporativa.
+  const lineas = String(textoReciente || '')
+    .split(RE_SALTO)
+    .map((l) => l.replace(RE_VINETA, '').trim())
+    .filter((l) => l && l.length <= 60);
+
+  const campo = faltan[0];
+
+  if (/C[ée]dula Representante/i.test(campo)) {
+    // Un número suelto: es lo que se pidió.
+    for (const l of lineas) {
+      const m = l.match(RE_NUMERO);
+      if (m) {
+        const doc = m[0].replace(RE_NO_DIGITO, '');
+        if (doc.length >= 5) { datos.representante.cedula = doc; return true; }
+      }
+    }
+    return false;
+  }
+
+  // Para el resto vale la primera línea con contenido que no sea una cortesía.
+  const util = lineas.find((l) => !RE_CORTESIA.test(l));
+  if (!util) return false;
+
+  // "El paralelo es el A" → se queda con lo que va tras el verbo.
+  const valor = (util.match(RE_TRAS_VERBO)?.[1] ?? util).trim();
+  if (!valor) return false;
+
+  const destino = {
+    'Unidad Educativa': () => (datos.solicitud.institucion = valor),
+    'Grado': () => (datos.solicitud.grado = valor),
+    'Paralelo': () => (datos.solicitud.paralelo = valor),
+    'Parentesco': () => (datos.parentesco = valor),
+    'Nombre y Apellido Representante Legal': () => (datos.representante.nombre = valor),
+    'Nombre y Apellidos del estudiante': () => (datos.representado.nombre = valor),
+  }[campo];
+
+  if (!destino) return false;
+  destino();
+  return true;
+}
+
+/**
  * Comprueba qué falta o está mal en los datos extraídos.
  * @returns {string[]} lista vacía si el consentimiento se puede registrar.
  */
@@ -496,7 +561,14 @@ export async function procesarRespuestaConsentimiento({ conversacion, hiloId, me
     return { resultado: 'rechazado', texto: textoRechazo() };
   }
 
-  const faltan = validarConsentimiento(datos);
+  let faltan = validarConsentimiento(datos);
+
+  // Si solo falta un dato y el último correo trae una respuesta suelta —sin
+  // etiqueta—, se toma como ese dato y se vuelve a validar.
+  if (faltan.length === 1 && completarCampoSuelto(datos, faltan, textos[textos.length - 1])) {
+    faltan = validarConsentimiento(datos);
+  }
+
   if (faltan.length > 0) return { resultado: 'faltan', faltan, texto: textoFaltanDatos(faltan) };
 
   const registro = await registrarConsentimiento({ datos, remitente, hiloId, mensajeId });

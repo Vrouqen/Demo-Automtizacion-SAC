@@ -51,24 +51,23 @@ export function esCedulaEcuatoriana(valor) {
  * Valida un documento para el registro. Devuelve `{ valor, tipo }` si sirve, o
  * `{ error }` con un mensaje que se le puede mostrar tal cual al usuario.
  *
- * Regla: si tiene pinta de cédula ecuatoriana (10 dígitos) se le exige el
- * dígito verificador — así se atrapan los errores de tipeo, que es el fallo
- * real y frecuente. Cualquier otro formato se acepta como pasaporte o
- * documento extranjero, marcándolo como no verificado.
+ * Solo se comprueba la FORMA: diez dígitos para una cédula ecuatoriana.
+ *
+ * El dígito verificador (módulo 10) se comprobaba antes y se quitó a propósito:
+ * rechazaba cédulas que las personas daban como suyas, y el correo entraba en un
+ * bucle de "su cédula no es válida" del que no salían. Entre bloquear a alguien
+ * con una cédula real y aceptar una mal tecleada, lo segundo hace menos daño: el
+ * registro es prueba de lo que la persona declaró, no un padrón verificado.
  */
 export function validarDocumento(valor) {
   const doc = normalizarDocumento(valor);
 
   if (!doc) return { error: 'no se indicó ningún número de documento' };
 
-  if (/^\d{10}$/.test(doc)) {
-    return esCedulaEcuatoriana(doc)
-      ? { valor: doc, tipo: 'cedula_ec' }
-      : { error: `la cédula ${doc} no es válida (revisa que los 10 dígitos estén completos y correctos)` };
-  }
+  if (/^\d{10}$/.test(doc)) return { valor: doc, tipo: 'cedula_ec' };
 
-  // Una cadena de solo dígitos que no llega a 10 casi siempre es una cédula
-  // incompleta, no un pasaporte: conviene decirlo con claridad.
+  // Solo dígitos pero sin llegar a diez: casi siempre es un número incompleto,
+  // no un pasaporte, y conviene decirlo con claridad.
   if (/^\d+$/.test(doc)) {
     return { error: `${doc} tiene ${doc.length} dígitos; la cédula ecuatoriana tiene 10` };
   }
