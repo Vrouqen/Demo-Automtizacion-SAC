@@ -31,6 +31,21 @@ const paginaEtagGzip = paginaEtag.slice(0, -1) + '-gzip"';
 // es que tras un despliegue puede verse la versión anterior durante ese minuto.
 const CACHE_PAGINA = 'public, max-age=60';
 
+/**
+ * Arreglo del documento al que se refiere una consulta: estudiantes o docentes.
+ *
+ * Ambos se guardan en el mismo documento del colegio, con la misma forma y el
+ * mismo cifrado; lo único que cambia es el arreglo. Por defecto, estudiantes:
+ * es lo que pedían todas las llamadas antes de que existiera este parámetro, y
+ * así una petición vieja sigue significando lo mismo.
+ */
+function campoDelRol(rol) {
+  // Se aceptan singular y plural: quien llame escribirá 'docente' o 'docentes'
+  // según de dónde venga, y confundirlos devolvería el arreglo equivocado en
+  // silencio, que es la peor forma de fallar aquí.
+  return ['docente', 'docentes'].includes(normalizar(rol || '')) ? 'docentes' : 'estudiantes';
+}
+
 function respuestaJson(statusCode, cuerpo) {
   return {
     statusCode,
@@ -227,10 +242,15 @@ const responder = async (event) => {
         return respuestaJson(400, { error: 'Elige un colegio y un periodo para ver los filtros' });
       }
 
+      // Estudiantes y docentes viven en dos arreglos del mismo documento y con
+      // la misma forma. Todo lo que sigue es idéntico salvo de cuál se lee, así
+      // que el rol solo decide el nombre del campo.
+      const campo = campoDelRol(query.rol);
+
       const col = await coleccionColegios();
       const delPeriodo = {
         $filter: {
-          input: { $ifNull: ['$estudiantes', []] },
+          input: { $ifNull: [`$${campo}`, []] },
           as: 'e',
           cond: { $eq: ['$$e.periodo', periodo] },
         },
@@ -251,7 +271,7 @@ const responder = async (event) => {
                     $map: {
                       input: {
                         $filter: {
-                          input: { $ifNull: ['$estudiantes', []] },
+                          input: { $ifNull: [`$${campo}`, []] },
                           as: 'e',
                           cond: grado
                             ? { $and: [{ $eq: ['$$e.periodo', periodo] }, { $eq: ['$$e.grado', grado] }] }
@@ -281,10 +301,11 @@ const responder = async (event) => {
     }
 
     // Consultar credenciales: búsqueda real. Solo descifra la PÁGINA de
-    // resultados devuelta, nunca el padrón completo del colegio. Solo
-    // estudiantes (esta app ya no gestiona credenciales de docentes).
+    // resultados devuelta, nunca el padrón completo del colegio. Sirve tanto a
+    // estudiantes como a docentes; el parámetro `rol` elige el arreglo.
     if (metodo === 'GET' && query.buscar) {
       const { colegioId, periodo, grado, paralelo } = query;
+      const campo = campoDelRol(query.rol);
       if (!colegioId || !periodo) {
         return respuestaJson(400, { error: 'Elige un colegio y un periodo para consultar credenciales' });
       }
@@ -305,9 +326,9 @@ const responder = async (event) => {
             $project: {
               nombre: 1,
               codigo: 1,
-              estudiantes: {
+              registros: {
                 $filter: {
-                  input: { $ifNull: ['$estudiantes', []] },
+                  input: { $ifNull: [`$${campo}`, []] },
                   as: 'e',
                   cond: { $and: condiciones },
                 },
@@ -319,7 +340,7 @@ const responder = async (event) => {
 
       if (!doc) return respuestaJson(404, { error: 'Colegio no encontrado' });
 
-      let filtrados = doc.estudiantes || [];
+      let filtrados = doc.registros || [];
 
       // El nombre se busca sobre TODO lo que quedó y antes de paginar: si se
       // aplicara después, solo miraría los 20 de la página actual y parecería
@@ -347,6 +368,7 @@ const responder = async (event) => {
       return respuestaJson(200, {
         colegio: { id: doc._id, nombre: doc.nombre, codigo: doc.codigo },
         periodo,
+        rol: campo === 'docentes' ? 'docente' : 'estudiante',
         total: filtrados.length,
         pagina,
         limite,
@@ -354,7 +376,7 @@ const responder = async (event) => {
       });
     }
 
-    // Editar UN estudiante.
+    // Editar UN registro, de estudiante o de docente.
     //
     // Se identifica por plataforma + usuario actual dentro del periodo, que es
     // exactamente una fila de la tabla de resultados. Solo se tocan los campos
@@ -364,6 +386,7 @@ const responder = async (event) => {
         event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : event.body || '{}'
       );
       const { colegioId, periodo, plataforma, login, cambios } = cuerpo;
+      const campo = campoDelRol(cuerpo.rol ?? query.rol);
 
       if (!colegioId || !periodo || !login) {
         return respuestaJson(400, { error: 'Faltan el colegio, el periodo o el usuario a editar' });
@@ -373,7 +396,7 @@ const responder = async (event) => {
       }
 
       const col = await coleccionColegios();
-      const doc = await col.findOne({ _id: colegioId }, { projection: { nombre: 1, estudiantes: 1 } });
+      const doc = await col.findOne({ _id: colegioId }, { projection: { nombre: 1, [campo]: 1 } });
       if (!doc) return respuestaJson(404, { error: 'Colegio no encontrado' });
 
       const mismaFila = (e) =>
@@ -381,12 +404,14 @@ const responder = async (event) => {
         String(e.plataforma || '') === String(plataforma || '') &&
         descifrar(e.login, config.cifrado.clave) === String(login);
 
-      const indice = (doc.estudiantes || []).findIndex(mismaFila);
+      const indice = (doc[campo] || []).findIndex(mismaFila);
       if (indice === -1) {
-        return respuestaJson(404, { error: 'No se encontró ese estudiante en el periodo indicado' });
+        return respuestaJson(404, {
+          error: `No se encontró ese ${campo === 'docentes' ? 'docente' : 'estudiante'} en el periodo indicado`,
+        });
       }
 
-      const actual = doc.estudiantes[indice];
+      const actual = doc[campo][indice];
       const texto = (v) => (typeof v === 'string' ? v.trim() : '');
       const actualizado = { ...actual };
 
@@ -399,8 +424,12 @@ const responder = async (event) => {
         actualizado.nombreNormalizado = normalizar(nombreNuevo);
       }
 
-      if (texto(cambios.grado)) actualizado.grado = texto(cambios.grado);
-      if (texto(cambios.grupo)) actualizado.grupo = texto(cambios.grupo);
+      // Un docente no tiene grado ni paralelo: si llegaran, se ignoran en vez de
+      // inventarle un curso que la pantalla luego mostraría como suyo.
+      if (campo === 'estudiantes') {
+        if (texto(cambios.grado)) actualizado.grado = texto(cambios.grado);
+        if (texto(cambios.grupo)) actualizado.grupo = texto(cambios.grupo);
+      }
 
       if (texto(cambios.plataforma)) {
         const nueva = normalizar(cambios.plataforma);
@@ -416,14 +445,15 @@ const responder = async (event) => {
       if (texto(cambios.login)) actualizado.login = cifrar(texto(cambios.login), config.cifrado.clave);
       if (texto(cambios.contrasena)) actualizado.contrasena = cifrar(texto(cambios.contrasena), config.cifrado.clave);
 
-      const estudiantes = [...doc.estudiantes];
-      estudiantes[indice] = actualizado;
-      await col.updateOne({ _id: colegioId }, { $set: { estudiantes, actualizadoEn: new Date() } });
+      const registros = [...doc[campo]];
+      registros[indice] = actualizado;
+      await col.updateOne({ _id: colegioId }, { $set: { [campo]: registros, actualizadoEn: new Date() } });
 
-      console.log(`[editar] colegio=${colegioId} periodo=${periodo} usuario=${login}`);
+      console.log(`[editar] colegio=${colegioId} periodo=${periodo} rol=${campo} usuario=${login}`);
 
       return respuestaJson(200, {
         colegio: { id: doc._id, nombre: doc.nombre },
+        rol: campo === 'docentes' ? 'docente' : 'estudiante',
         // Se devuelve el registro ya actualizado —sin la contraseña cifrada—
         // para que la pantalla refresque la fila sin volver a consultar.
         estudiante: {
@@ -448,6 +478,7 @@ const responder = async (event) => {
         event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : event.body || '{}'
       );
       const { colegioId, periodo } = cuerpo;
+      const campo = campoDelRol(cuerpo.rol ?? query.rol);
       const objetivos = Array.isArray(cuerpo.estudiantes) ? cuerpo.estudiantes : [];
 
       if (!colegioId || !periodo) {
@@ -463,7 +494,7 @@ const responder = async (event) => {
       }
 
       const col = await coleccionColegios();
-      const doc = await col.findOne({ _id: colegioId }, { projection: { nombre: 1, estudiantes: 1 } });
+      const doc = await col.findOne({ _id: colegioId }, { projection: { nombre: 1, [campo]: 1 } });
       if (!doc) return respuestaJson(404, { error: 'Colegio no encontrado' });
 
       // Clave de una fila de la tabla. El login va cifrado en la base, así que
@@ -473,7 +504,7 @@ const responder = async (event) => {
 
       const quedan = [];
       const eliminados = [];
-      for (const e of doc.estudiantes || []) {
+      for (const e of doc[campo] || []) {
         const coincide =
           e.periodo === periodo && aBorrar.has(clave(e.plataforma, descifrar(e.login, config.cifrado.clave)));
 
@@ -493,21 +524,22 @@ const responder = async (event) => {
 
       if (eliminados.length === 0) {
         return respuestaJson(404, {
-          error: 'No se encontró ninguno de esos estudiantes en el periodo indicado',
+          error: `No se encontró ninguno de esos ${campo} en el periodo indicado`,
           eliminados: 0,
         });
       }
 
-      await col.updateOne({ _id: colegioId }, { $set: { estudiantes: quedan, actualizadoEn: new Date() } });
+      await col.updateOne({ _id: colegioId }, { $set: { [campo]: quedan, actualizadoEn: new Date() } });
 
       console.log(
-        `[eliminar] colegio=${colegioId} periodo=${periodo} borrados=${eliminados.length} ` +
+        `[eliminar] colegio=${colegioId} periodo=${periodo} rol=${campo} borrados=${eliminados.length} ` +
           `restantes=${quedan.length}`
       );
 
       return respuestaJson(200, {
         colegio: { id: doc._id, nombre: doc.nombre },
         periodo,
+        rol: campo === 'docentes' ? 'docente' : 'estudiante',
         eliminados: eliminados.length,
         detalle: eliminados,
         restantes: quedan.length,
