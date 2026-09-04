@@ -74,6 +74,10 @@ export const config = {
   equipos: {
     cuentas: (process.env.CORREO_EQUIPO_CUENTAS || '').trim(),
     servicioDigital: (process.env.CORREO_EQUIPO_SERVICIO_DIGITAL || '').trim(),
+    // Soporte de Santillana Digital. Todo requerimiento que sea de Digital se
+    // le reenvía entero, sin pasar por el reparto entre agentes: es un buzón
+    // fijo de un equipo, no una persona con cola de casos.
+    soporteDigital: (process.env.CORREO_SOPORTE_DIGITAL || 'soportedigital@santillana.com').trim(),
   },
   // Consentimiento de tratamiento de datos. Antes de atender una solicitud, el
   // cliente debe aceptar la política respondiendo ACEPTO. La aceptación se
@@ -127,6 +131,7 @@ export function esCorreoInterno(valor) {
     ...config.agentes.correos.map((c) => c.toLowerCase()),
     config.equipos.cuentas.toLowerCase(),
     config.equipos.servicioDigital.toLowerCase(),
+    config.equipos.soporteDigital.toLowerCase(),
   ].filter(Boolean);
   return internos.includes(dir);
 }

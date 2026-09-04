@@ -5,7 +5,7 @@ import { createHash } from 'crypto';
 import path from 'path';
 import { config, validarConfig } from './config.js';
 import { parsearExcelCredenciales, registroIndividual } from './excel/parseExcel.js';
-import { coleccionColegios } from './db/mongo.js';
+import { coleccionColegios, coleccionAdcol } from './db/mongo.js';
 import { normalizar } from './utils/similitud.js';
 import { buscarPorNombre } from './utils/busquedaNombre.js';
 import { ordenarGrados, ordenarParalelos } from './utils/grados.js';
@@ -130,7 +130,7 @@ const responder = async (event) => {
     // endpoint de consulta debe quedar excluido aquí: si se olvida alguno, esta
     // guarda lo intercepta y devuelve HTML donde el llamador espera JSON (que es
     // justo lo que pasaba con ?opciones y ?buscar).
-    const pideDatos = Boolean(query.listar || query.opciones || query.buscar);
+    const pideDatos = Boolean(query.listar || query.opciones || query.buscar || query.adcol);
 
     if (metodo === 'GET' && !pideDatos) {
       const conGzip = aceptaGzip(event);
@@ -473,6 +473,112 @@ const responder = async (event) => {
     // por periodo + plataforma + login, que es exactamente una fila de la tabla
     // de resultados. No se acepta borrar "todo un grado" ni "todo un colegio":
     // una operación así, mal disparada, deja sin acceso a cientos de personas.
+    // ── Credenciales ADCOL ──────────────────────────────────────────────────
+    //
+    // Un acceso administrativo por colegio, en su propia colección. Se consulta
+    // entero y se filtra en Node: son ~550 documentos diminutos, así que paginar
+    // en Mongo costaría más código del que ahorra.
+    if (metodo === 'GET' && query.adcol) {
+      const col = await coleccionAdcol();
+      const docs = await col.find({}).toArray();
+
+      const consulta = normalizar(query.nombre || '');
+      const filtrados = consulta
+        ? docs.filter(
+            (d) =>
+              String(d.nombreNormalizado || '').includes(consulta) ||
+              String(d.codigo || '').toLowerCase().includes(consulta) ||
+              String(d._id).toLowerCase().includes(consulta) ||
+              normalizar(descifrar(d.usuario, config.cifrado.clave) || '').includes(consulta)
+          )
+        : docs;
+
+      const region = normalizar(query.region || '');
+      const porRegion = region ? filtrados.filter((d) => normalizar(d.region) === region) : filtrados;
+
+      porRegion.sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
+
+      const limite = Math.min(Math.max(parseInt(query.limite, 10) || 20, 1), 100);
+      const pagina = Math.max(parseInt(query.pagina, 10) || 1, 1);
+      const inicio = (pagina - 1) * limite;
+
+      return respuestaJson(200, {
+        total: porRegion.length,
+        pagina,
+        limite,
+        regiones: [...new Set(docs.map((d) => d.region).filter(Boolean))].sort(),
+        resultados: porRegion.slice(inicio, inicio + limite).map((d) => ({
+          id: d._id,
+          nombre: d.nombre,
+          codigo: d.codigo || '',
+          region: d.region || '',
+          usuario: descifrar(d.usuario, config.cifrado.clave) || '',
+          contrasena: descifrar(d.contrasena, config.cifrado.clave) || '',
+          // Le ahorra a la pantalla repetir la regla de qué cuenta como
+          // incompleto, y evita que las dos definiciones se separen.
+          incompleto: !d.usuario || !d.contrasena,
+          actualizadoEn: d.actualizadoEn || null,
+        })),
+      });
+    }
+
+    // Crear o modificar UNA credencial ADCOL.
+    if (metodo === 'POST' && query.adcolGuardar) {
+      const cuerpo = JSON.parse(
+        event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : event.body || '{}'
+      );
+      const texto = (v) => (typeof v === 'string' ? v.trim() : v === undefined || v === null ? '' : String(v).trim());
+
+      const id = texto(cuerpo.id);
+      const nombre = texto(cuerpo.nombre);
+      if (!id) return respuestaJson(400, { error: 'Falta el id del colegio' });
+      if (!nombre) return respuestaJson(400, { error: 'Falta el nombre del colegio' });
+
+      const col = await coleccionAdcol();
+      const existente = await col.findOne({ _id: id });
+
+      if (cuerpo.crear && existente) {
+        return respuestaJson(409, { error: `Ya existe una credencial ADCOL para el colegio ${id}` });
+      }
+      if (!cuerpo.crear && !existente) {
+        return respuestaJson(404, { error: `No existe una credencial ADCOL para el colegio ${id}` });
+      }
+
+      const doc = {
+        nombre,
+        nombreNormalizado: normalizar(nombre),
+        codigo: texto(cuerpo.codigo),
+        region: texto(cuerpo.region),
+        actualizadoEn: new Date(),
+      };
+
+      // Usuario y contraseña se cifran igual que las del padrón: son el acceso
+      // administrativo de un colegio entero, no un dato menor.
+      const usuario = texto(cuerpo.usuario);
+      const contrasena = texto(cuerpo.contrasena);
+      doc.usuario = usuario ? cifrar(usuario, config.cifrado.clave) : null;
+      doc.contrasena = contrasena ? cifrar(contrasena, config.cifrado.clave) : null;
+
+      await col.updateOne(
+        { _id: id },
+        { $set: doc, $setOnInsert: { creadoEn: new Date() } },
+        { upsert: true }
+      );
+
+      console.log(`[adcol] ${existente ? 'editado' : 'creado'} colegio=${id}`);
+
+      return respuestaJson(existente ? 200 : 201, {
+        id,
+        nombre,
+        codigo: doc.codigo,
+        region: doc.region,
+        usuario,
+        contrasena,
+        incompleto: !usuario || !contrasena,
+        creado: !existente,
+      });
+    }
+
     if (metodo === 'POST' && query.eliminar) {
       const cuerpo = JSON.parse(
         event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : event.body || '{}'

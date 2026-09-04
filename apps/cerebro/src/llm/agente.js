@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
-import { buscarEstudiante, buscarColegio, contarEstudiantesActivos } from '../services/busqueda.js';
+import { buscarEstudiante, buscarDocente, buscarColegio, contarEstudiantesActivos } from '../services/busqueda.js';
 import { crearTicket } from '../services/tickets.js';
 import { crearEscalamiento } from '../services/escalamientos.js';
 import {
@@ -50,6 +50,7 @@ const ESTADOS_ESPERANDO_USUARIO = new Set([
   'HOMONIMOS',
   'COLEGIO_NO_ENCONTRADO',
   'ESTUDIANTE_NO_ENCONTRADO',
+  'DOCENTE_NO_ENCONTRADO',
   'CANDIDATOS',
 ]);
 
@@ -96,17 +97,31 @@ const TOOLS = [
   {
     name: 'buscar_credenciales',
     description:
-      'Busca las credenciales (login y contraseña) de un estudiante. Usa coincidencia difusa: ' +
-      'tolera nombres incompletos en la base de datos (ej. solo un nombre y un apellido) y nombres ' +
-      'de colegio escritos de forma aproximada. La ciudad (provincia) y el cantón ayudan a ' +
-      'distinguir colegios homónimos. Llama a esta herramienta en cuanto tengas al menos ' +
-      'el nombre del estudiante y el colegio; usa "n/a" en los datos de ubicación que no tengas.',
+      'Busca las credenciales (login y contraseña) de un ESTUDIANTE o de un DOCENTE, según el ' +
+      'parámetro rol. Usa coincidencia difusa: tolera nombres incompletos en la base de datos ' +
+      '(ej. solo un nombre y un apellido) y nombres de colegio escritos de forma aproximada. ' +
+      'La ciudad (provincia) y el cantón ayudan a distinguir colegios homónimos. Llama a esta ' +
+      'herramienta en cuanto tengas al menos el nombre de la persona y el colegio; usa "n/a" en ' +
+      'los datos de ubicación que no tengas.',
     parametersJsonSchema: {
       type: 'object',
       properties: {
-        nombre_completo: { type: 'string', description: 'Nombre completo del estudiante' },
-        nivel: { type: 'string', description: 'Nivel o grado del estudiante (si se conoce)' },
-        paralelo: { type: 'string', description: 'Paralelo o grupo (si se conoce)' },
+        rol: {
+          type: 'string',
+          enum: ['estudiante', 'docente'],
+          description:
+            'A qué padrón pertenece la persona. "docente" cuando quien escribe es un profesor que ' +
+            'pide SUS PROPIAS credenciales; "estudiante" en los demás casos. Si no lo indicas, ' +
+            'se busca entre los estudiantes.',
+        },
+        nombre_completo: {
+          type: 'string',
+          description:
+            'Nombre completo de la persona cuyas credenciales se buscan: el del estudiante, o el ' +
+            'del propio docente cuando rol es "docente".',
+        },
+        nivel: { type: 'string', description: 'Nivel o grado del estudiante (si se conoce). No aplica a docentes.' },
+        paralelo: { type: 'string', description: 'Paralelo o grupo (si se conoce). No aplica a docentes.' },
         colegio: {
           type: 'string',
           description: 'Nombre de la unidad educativa (el oficial o cualquier nombre alternativo que dé el usuario)',
@@ -121,18 +136,35 @@ const TOOLS = [
   {
     name: 'derivar_a_agente_digital',
     description:
-      'Deriva el caso a una persona (agente digital de servicio). Úsala cuando: (a) el colegio no se ' +
+      'Entrega el caso a una persona. Úsala cuando: (a) el colegio no se ' +
       'encuentra después de haber pedido al usuario otro nombre de la institución y esa búsqueda también ' +
       'falló (o dijo no conocer otro nombre); (b) el estudiante no se encuentra después de que el usuario ' +
       'verificó/corrigió los datos y la nueva búsqueda también falló; (c) la consulta es sobre Santillana ' +
-      'pero no corresponde a ninguna de tus funciones. NO la uses en el primer intento fallido de una búsqueda.',
+      'pero no corresponde a ninguna de tus funciones; (d) el requerimiento es de SANTILLANA DIGITAL ' +
+      '(motivo santillana_digital), que se reenvía al buzón de ese equipo; (e) el requerimiento es de ' +
+      'OTRA PLATAFORMA —Pleno, Lectopolis, LQL, RLP o Richmond Studio— (motivo otra_plataforma). ' +
+      'NO la uses en el primer intento fallido de una búsqueda.',
     parametersJsonSchema: {
       type: 'object',
       properties: {
         motivo: {
           type: 'string',
-          enum: ['colegio_no_encontrado', 'estudiante_no_encontrado', 'otro'],
-          description: 'Motivo del escalamiento',
+          enum: [
+            'colegio_no_encontrado',
+            'estudiante_no_encontrado',
+            'santillana_digital',
+            'otra_plataforma',
+            'otro',
+          ],
+          description:
+            'Motivo del escalamiento. Usa santillana_digital cuando el requerimiento sea de Santillana ' +
+            'Digital, y otra_plataforma cuando sea de Pleno, Lectopolis, LQL, RLP o Richmond Studio.',
+        },
+        plataforma: {
+          type: 'string',
+          description:
+            'Solo con motivo otra_plataforma: nombre de la plataforma de la que trata el requerimiento ' +
+            '(Pleno, Lectopolis, LQL, RLP o Richmond Studio).',
         },
         resumen_corto: {
           type: 'string',
@@ -151,8 +183,9 @@ const TOOLS = [
         datos_estudiante: {
           type: 'string',
           description:
-            'Nombre completo, nivel y paralelo del estudiante. Escribe "no proporcionado" en los ' +
-            'datos que el usuario no haya dado.',
+            'Nombre completo, nivel y paralelo del estudiante. Con motivo santillana_digital u ' +
+            'otra_plataforma, pon aquí quién escribe y en qué calidad (docente, representante). ' +
+            'Escribe "no proporcionado" en los datos que el usuario no haya dado.',
         },
         datos_institucion: {
           type: 'string',
@@ -268,7 +301,22 @@ por correo electrónico a las cuentas de soporte de Ecuador. Respondes SIEMPRE e
 profesional y cordial, apropiado para un correo de soporte (puedes ser un poco más extenso que en un
 chat, pero ve al punto).
 
-## 0. LA LISTA DE DATOS (vale para credenciales, reseteos e incidencias)
+## 0. QUIÉN ESCRIBE: DOCENTE O REPRESENTANTE
+Atiendes a DOS tipos de usuario y no piden lo mismo:
+- Un REPRESENTANTE (padre, madre, apoderado) pide las credenciales de SU REPRESENTADO, un estudiante.
+- Un DOCENTE pide SUS PROPIAS credenciales. No hay ningún menor de por medio, así que no tiene
+  sentido pedirle nombre del estudiante, parentesco, grado ni paralelo: no existen en su caso.
+
+Un docente se identifica porque lo dice ("soy docente", "soy profesora de…"), porque el formulario de
+consentimiento vino con "Docente: Sí", o porque pide claramente su propio acceso. Ante la duda,
+pregúntaselo antes de pedirle una lista de datos que quizá no le corresponde.
+
+A un DOCENTE pídele solo:
+- Nombre completo del docente
+- Unidad educativa (colegio)
+Y busca con buscar_credenciales usando rol="docente" y su nombre en nombre_completo.
+
+## 0a. LA LISTA DE DATOS DEL ESTUDIANTE (credenciales, reseteos e incidencias)
 Cuando tengas que pedir datos del estudiante, pídelos SIEMPRE con estas etiquetas y EN ESTE ORDEN,
 saltándote los que ya te haya dado:
 - Nombre completo del estudiante
@@ -294,8 +342,12 @@ formulario de consentimiento, que ya pide el nombre del estudiante, la instituci
 paralelo. Pedirlos tú sería recoger datos de un menor sin permiso y además obligar al usuario a
 escribirlos dos veces.
 
-## 1. Obtener credenciales de un estudiante
-Datos necesarios ANTES de buscar: los del punto 0.
+## 1. Obtener credenciales de un estudiante o de un docente
+Si quien escribe es un DOCENTE que pide su propio acceso, te basta su nombre completo y el colegio:
+llama a buscar_credenciales con rol="docente" y deja nivel y paralelo vacíos. Todo lo que sigue en
+este punto sobre grado y paralelo NO aplica a docentes.
+
+Datos necesarios ANTES de buscar las de un estudiante: los del punto 0a.
 - REGLA CENTRAL: si falta alguno, NO llames todavía a buscar_credenciales. Tu respuesta debe pedir
   TODOS los que falten, en una sola lista con guiones (no de uno en uno), y quedar a la espera del
   correo del usuario.
@@ -368,9 +420,9 @@ devuelve HOMONIMOS, pide ciudad/cantón para confirmar el colegio.
 
 ## 2. Reseteo de contraseña
 El reseteo lo ejecuta el equipo de Cuentas, que atiende leyendo SOLO el ticket: no ve este correo ni
-esta conversación. Por eso, ANTES de crear el ticket necesitas los datos del punto 0 (nombre, colegio,
+esta conversación. Por eso, ANTES de crear el ticket necesitas los datos del punto 0a (nombre, colegio,
 ciudad, nivel, paralelo). Si falta alguno, NO llames a crear_ticket todavía: pídelos en una sola lista
-con guiones, en el orden del punto 0, y espera la respuesta. Un correo como "no me acuerdo la
+con guiones, en el orden del punto 0a, y espera la respuesta. Un correo como "no me acuerdo la
 contraseña de mi hijo" no alcanza para abrir un ticket: no dice de qué estudiante ni de qué colegio se
 trata.
 
@@ -387,7 +439,7 @@ si reportan que el PIN no les sirve, solo para dejarlo registrado.
 
 ## 4. Incidencias de plataforma
 Si reportan que no ven contenido, no ven sus clases, o algo similar, usa crear_ticket (tipo
-"incidencia_plataforma", equipo "servicio_digital"). Necesitas los datos del punto 0 MÁS el detalle
+"incidencia_plataforma", equipo "servicio_digital"). Necesitas los datos del punto 0a MÁS el detalle
 minucioso del problema: qué no puede ver o hacer, desde cuándo, qué mensaje de error aparece y en qué
 plataforma (Compartir o CREO). Si falta algo, pídelo primero en una lista con guiones, en ese orden.
 Menciona si hay adjuntos relevantes.
@@ -396,6 +448,30 @@ Menciona si hay adjuntos relevantes.
 Significa que la acción NO se ejecutó porque faltan datos. No hay ticket ni caso: no los menciones,
 no inventes códigos y no digas que ya se gestionó. Limítate a pedirle al usuario, en una lista con
 guiones, exactamente los datos que vienen en el campo "faltan".
+
+## 4c. Requerimientos de SANTILLANA DIGITAL
+Si el requerimiento está enfocado en Santillana Digital —el área, sus servicios o sus gestiones—, y no
+es una de las funciones que sí resuelves (credenciales, reseteo, PIN, incidencias de Compartir/CREO),
+llama a derivar_a_agente_digital con motivo "santillana_digital". El sistema lo reenvía al buzón de
+Soporte Digital. Antes de derivar necesitas TRES cosas: el detalle de lo que pide con sus propias
+palabras, quién escribe y en qué calidad (docente, representante, estudiante), y su unidad educativa
+y ciudad. Si falta algo, pídelo en una lista con guiones y espera respuesta. Lo que NO debes pedir es
+nombre del estudiante, parentesco, grado ni paralelo: aquí no hay ningún estudiante que buscar.
+
+## 4d. Requerimientos de OTRAS PLATAFORMAS
+Pleno, Lectopolis, LQL, RLP y Richmond Studio NO son plataformas que atiendas. Si el requerimiento
+trata de alguna de ellas, llama a derivar_a_agente_digital con motivo "otra_plataforma" e indica cuál
+en el campo "plataforma".
+
+Antes de derivar recoge lo mismo que en el punto 4c: qué necesita exactamente y desde cuándo, quién
+escribe y en qué calidad, y su unidad educativa y ciudad. Una persona va a atender el caso leyendo
+SOLO el correo de derivación, así que sin esos datos no puede hacer nada. Pídelos en una sola lista
+con guiones y espera su respuesta; no menciones todavía derivación ni código de caso, porque aún no
+existe. Tampoco pidas grado ni paralelo: no hay estudiante que buscar en el padrón.
+
+Cuando ya lo tengas, respóndele igual que en cualquier otra derivación: que su caso fue asignado a
+una persona del equipo, con el código, y que la respuesta le llegará a este mismo correo. No le digas
+que no atiendes esa plataforma ni lo mandes a escribir a otro lado.
 
 ## 5. Otros temas
 - Si la consulta SÍ tiene que ver con Santillana (sus libros, plataformas o servicios) pero no calza
@@ -547,7 +623,22 @@ export function validarDatosDerivacion(args, { turnosUsuario = 1 } = {}) {
     faltan.push('Qué necesita exactamente y para qué, con sus propias palabras');
     faltan.push('Desde cuándo tiene el problema y qué mensaje de error ve, si aplica');
   }
-  if (args.motivo !== 'otro' || dato(args.datos_estudiante) || dato(args.datos_institucion)) {
+  // De otro equipo desde el principio (Santillana Digital u otra plataforma).
+  //
+  // No se pide grado ni paralelo: no hay ningún estudiante que buscar en el
+  // padrón. Pero SÍ hace falta saber a quién se le responde y de qué
+  // institución, porque quien atienda el caso solo va a leer el correo de
+  // derivación y sin eso no puede ni ubicar la cuenta ni contestar.
+  const deOtroEquipo = args.motivo === 'santillana_digital' || args.motivo === 'otra_plataforma';
+
+  if (deOtroEquipo) {
+    if (!dato(args.datos_estudiante)) {
+      faltan.push('Nombre completo de quien escribe y en qué calidad lo hace (docente, representante o estudiante)');
+    }
+    if (!dato(args.datos_institucion)) {
+      faltan.push('Unidad educativa (colegio) y ciudad');
+    }
+  } else if (args.motivo !== 'otro' || dato(args.datos_estudiante) || dato(args.datos_institucion)) {
     if (!dato(args.datos_estudiante)) {
       faltan.push('Nombre completo del estudiante, nivel y paralelo');
     }
@@ -581,7 +672,9 @@ async function ejecutarTool(nombre, args, contexto) {
   try {
     switch (nombre) {
       case 'buscar_credenciales': {
-        const resultado = await buscarEstudiante({
+        const esDocente = String(args.rol || '').toLowerCase() === 'docente';
+        const buscar = esDocente ? buscarDocente : buscarEstudiante;
+        const resultado = await buscar({
           nombreCompleto: args.nombre_completo,
           nivel: args.nivel,
           paralelo: args.paralelo,
@@ -592,7 +685,11 @@ async function ejecutarTool(nombre, args, contexto) {
         });
         await registrarEvento(contexto.hiloId, {
           tipo: `credencial_${String(resultado.status).toLowerCase()}`,
-          detalle: { colegio: args.colegio, nombre: args.nombre_completo },
+          detalle: {
+            colegio: args.colegio,
+            nombre: args.nombre_completo,
+            rol: esDocente ? 'docente' : 'estudiante',
+          },
         });
         // Si la búsqueda no fue directa (homónimos, colegio/estudiante no
         // encontrado, candidatos), el asistente le pedirá algo al usuario y
@@ -623,7 +720,9 @@ async function ejecutarTool(nombre, args, contexto) {
             asunto: contexto.asunto,
             motivo: args.motivo,
             resumenCorto: args.resumen_corto,
-            descripcionDetallada: args.descripcion_detallada,
+            descripcionDetallada: args.plataforma
+              ? `Plataforma: ${args.plataforma}\n\n${args.descripcion_detallada}`
+              : args.descripcion_detallada,
             datosEstudiante: args.datos_estudiante,
             datosInstitucion: args.datos_institucion,
             intentosPrevios: args.intentos_previos,
@@ -651,7 +750,12 @@ async function ejecutarTool(nombre, args, contexto) {
         }
         await registrarEvento(contexto.hiloId, {
           tipo: 'escalado_a_agente',
-          detalle: { codigo: escalamiento.codigo, agenteEmail: escalamiento.agenteEmail, motivo: args.motivo },
+          detalle: {
+            codigo: escalamiento.codigo,
+            agenteEmail: escalamiento.agenteEmail,
+            motivo: args.motivo,
+            plataforma: args.plataforma || null,
+          },
         });
         contexto.escalamiento = escalamiento;
         // Al modelo solo le interesa el código para informar al usuario;
@@ -897,6 +1001,27 @@ function datosYaEntregados(registro) {
   if (!registro) return '';
 
   const s = registro.solicitud || {};
+
+  // Un docente pide su propio acceso: el formulario solo le pidió su nombre y su
+  // cédula, así que lo que hay que decirle al modelo es OTRA cosa. Sin esto
+  // buscaría al docente entre los estudiantes y no lo encontraría nunca.
+  if (registro.esDocente) {
+    const filas = [
+      ['Nombre completo del docente', registro.representante?.nombre],
+      ['Unidad educativa', s.institucion],
+    ].filter(([, valor]) => valor);
+
+    return (
+      ' Quien escribe es un DOCENTE y pide SUS PROPIAS credenciales: no hay estudiante de por medio, ' +
+      'así que no le pidas nombre de estudiante, parentesco, grado ni paralelo. ' +
+      'Busca con buscar_credenciales usando rol="docente".' +
+      (filas.length
+        ? ' Datos que YA entregó; úsalos tal cual y NO los vuelvas a pedir:' +
+          filas.map(([etiqueta, valor]) => `\n- ${etiqueta}: ${valor}`).join('')
+        : ' Si te falta la unidad educativa, pídesela: es lo único que necesitas además de su nombre.')
+    );
+  }
+
   const filas = [
     ['Nombre completo del estudiante', registro.representado?.nombre],
     ['Unidad educativa', s.institucion],

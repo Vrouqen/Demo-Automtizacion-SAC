@@ -78,6 +78,7 @@ function interpretarSiNo(valor) {
  * Se listan en su forma NORMALIZADA (minúsculas y sin tildes).
  */
 const ETIQUETAS = [
+  ['esDocente', /docente|profesor\w*|maestr[oa]|educador\w*/],
   ['otorgado', /autoriz\w*|consient\w*|otorg\w*|acept\w*|consentimiento/],
   ['parentesco', /parentesco|relacion|vinculo/],
   ['solicitud.institucion', /unidad educativa|instituci\w*|colegio|escuela|plantel/],
@@ -88,7 +89,7 @@ const ETIQUETAS = [
   ['representado.cedula', /(?:cedula|documento|identificacion|pasaporte|c\.?i\.?|id)\s*(?:de|del|de la)?\s*(?:estudiante|representad\w*|alumn\w*|hij[oa]|menor)/],
   ['representante.cedula', /(?:cedula|documento|identificacion|pasaporte|c\.?i\.?|id)(?:\s*(?:de|del|de la)?\s*(?:representante|padre|madre|solicitante|apoderad\w*)\w*(?:\s*legal)?)?/],
   ['representado.nombre', /nombres?\s*(?:y\s*apellidos?)?\s*(?:de|del|de la)?\s*(?:estudiante|representad\w*|alumn\w*|hij[oa]|menor)/],
-  ['representante.nombre', /nombres?\s*(?:y\s*apellidos?)?(?:\s*(?:de|del|de la)?\s*(?:representante|padre|madre|solicitante|apoderad\w*)\w*(?:\s*legal)?)?/],
+  ['representante.nombre', /nombres?\s*(?:y\s*apellidos?)?(?:\s*(?:de|del|de la)?\s*(?:representante|padre|madre|solicitante|docente|apoderad\w*)\w*(?:\s*legal)?)?/],
   ['representado.nombre', /apellidos?\s*(?:de|del|de la)?\s*(?:estudiante|representad\w*|alumn\w*|hij[oa]|menor)/],
   ['representante.nombre', /apellidos?/],
 ];
@@ -155,6 +156,9 @@ function leerLinea(linea, asignar) {
 export function parsearConsentimiento(texto) {
   const datos = {
     otorgado: null,
+    // ¿Quien escribe es un docente? Cambia qué datos se le exigen: un docente
+    // pide su propio acceso, así que no hay estudiante, parentesco ni curso.
+    esDocente: null,
     representante: { nombre: '', cedula: '' },
     representado: { nombre: '', cedula: '' },
     parentesco: '',
@@ -167,6 +171,11 @@ export function parsearConsentimiento(texto) {
     if (!v) return;
 
     if (campo === 'parentesco') { datos.parentesco ||= v; return; }
+    if (campo === 'esDocente') {
+      const si = interpretarSiNo(v);
+      if (si !== null) datos.esDocente ??= si;
+      return;
+    }
     if (campo === 'otorgado') {
       const si = interpretarSiNo(v);
       if (si !== null) datos.otorgado ??= si;
@@ -209,6 +218,7 @@ export function parsearConsentimiento(texto) {
 export function acumularConsentimiento(textos) {
   const total = {
     otorgado: null,
+    esDocente: null,
     representante: { nombre: '', cedula: '' },
     representado: { nombre: '', cedula: '' },
     parentesco: '',
@@ -220,6 +230,7 @@ export function acumularConsentimiento(textos) {
   for (const texto of textos) {
     const datos = parsearConsentimiento(texto);
     if (datos.otorgado !== null) total.otorgado = datos.otorgado;
+    if (datos.esDocente !== null) total.esDocente = datos.esDocente;
     if (datos.parentesco) total.parentesco = datos.parentesco;
     for (const grupo of ['representante', 'representado']) {
       for (const campo of ['nombre', 'cedula']) {
@@ -310,10 +321,15 @@ export function validarConsentimiento(datos) {
   const faltan = [];
 
   if (datos.otorgado !== true) faltan.push('La palabra "Sí" para autorizar');
-  if (!datos.representante.nombre) faltan.push('Nombre y Apellido Representante Legal');
+  if (!datos.representante.nombre) faltan.push('Nombre y Apellido del Solicitante');
 
   const docRep = validarDocumento(datos.representante.cedula);
   if (docRep.error) faltan.push(`Cédula Representante Legal (${docRep.error})`);
+
+  // Un docente pide SU PROPIO acceso: no hay representado, ni parentesco, ni
+  // curso. Exigírselos sería pedirle datos de un menor que no existe en su caso
+  // y dejarlo sin poder completar nunca el formulario.
+  if (datos.esDocente === true) return faltan;
 
   if (!datos.representado.nombre) faltan.push('Nombre y Apellidos del estudiante');
   if (!datos.parentesco) faltan.push('Parentesco');
@@ -338,9 +354,18 @@ const CORREO_SOPORTE = (config.cuentasSoporte && config.cuentasSoporte[0]) || 's
 /** Responsable de protección de datos: es a donde se ejercen los derechos. */
 const CORREO_DATOS = config.consentimiento.correoDatos;
 
+/*
+ * El formulario que ve el usuario.
+ *
+ * El orden importa y no es decorativo: "Docente" va primero porque de su
+ * respuesta depende cuántos campos tiene que llenar. Los TRES PRIMEROS son los
+ * únicos obligatorios para un docente —así lo dice el texto que va encima—, de
+ * modo que mover uno de sitio cambiaría lo que se le está pidiendo.
+ */
 const CAMPOS_PEDIDOS =
-  'Autoriza:\n' +
-  'Nombre y Apellido Representante Legal:\n' +
+  'Autoriza:\n\n' +
+  'Docente: (Si/No)\n' +
+  'Nombre y Apellido del Solicitante:\n' +
   'Cédula Representante Legal:\n' +
   'Nombre y Apellidos del estudiante:\n' +
   'Parentesco:\n' +
@@ -395,8 +420,10 @@ export function textoPolitica({ hiloId } = {}) {
 ` +
     '**¿Consiente el uso de los datos personales de su representado, mediante herramientas de ' +
     'inteligencia artificial, para validar su identidad y confirmar el vínculo entre ustedes?**\n' +
-    "Si está de acuerdo, responda **'Sí'** al presente correo electrónico, con los siguientes datos " +
-    'para brindar solución a su requerimiento\n\n' +
+    "Si está de acuerdo, responda **'Sí'** al presente correo electrónico.\n\n" +
+    'Si usted es docente, únicamente llene los tres primeros campos. En caso de que la solicitud ' +
+    'sea para estudiante, llene toda la información con los siguientes datos para brindar solución ' +
+    'a su requerimiento.\n\n' +
     CAMPOS_PEDIDOS +
     '\n\n**Autorizar la validación automatizada de la identidad de tu representado nos permite ' +
     'resolver tu solicitud en menor tiempo. Si prefieres no hacerlo, tu solicitud será igualmente ' +
@@ -487,6 +514,10 @@ export async function registrarConsentimiento({ datos, remitente, hiloId, mensaj
       cedula: validarDocumento(datos.representado.cedula).valor || '',
     },
     parentesco: datos.parentesco,
+    // Queda en el registro porque cambia QUÉ datos se recogieron: de un docente
+    // no hay representado ni parentesco, y sin esta marca el reporte parecería
+    // incompleto en vez de correcto.
+    esDocente: datos.esDocente === true,
     // Datos del colegio recogidos en el mismo correo. No forman parte del
     // registro legal, pero evitan volver a preguntárselos para la búsqueda.
     solicitud: datos.solicitud,
@@ -583,7 +614,8 @@ export async function procesarRespuestaConsentimiento({ conversacion, hiloId, me
 export const COLUMNAS_REPORTE = [
   'Fecha',
   'Hora',
-  'Nombre y Apellido (Representante legal)',
+  '¿Docente?',
+  'Nombre y Apellido (Solicitante)',
   'Cédula (Representante legal)',
   'Nombres y Apellidos (Representado)',
   'Parentesco',
@@ -595,6 +627,7 @@ function fila(r) {
   return [
     r.fecha || '',
     r.hora || '',
+    r.esDocente ? 'Sí' : 'No',
     r.representante?.nombre || '',
     r.representante?.cedula || '',
     r.representado?.nombre || '',

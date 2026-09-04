@@ -283,6 +283,7 @@ const CATEGORIA_POR_EVENTO = [
   ['credencial_homonimos', 'Colegios homónimos'],
   ['credencial_colegio_no_encontrado', 'Colegio no encontrado'],
   ['credencial_estudiante_no_encontrado', 'Estudiante no encontrado'],
+  ['credencial_docente_no_encontrado', 'Docente no encontrado'],
   ['credencial_candidatos', 'Varias coincidencias'],
   ['consulta_estudiantes_activos', 'Estudiantes activos'],
   ['pin_info', 'PIN de acceso'],

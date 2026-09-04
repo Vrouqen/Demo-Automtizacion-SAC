@@ -27,7 +27,21 @@ import { conFirmaTexto, sinMarcasNegrita } from '../utils/firma.js';
 const MOTIVOS_LEGIBLES = {
   colegio_no_encontrado: 'Institución educativa no encontrada',
   estudiante_no_encontrado: 'Estudiante no encontrado',
+  santillana_digital: 'Requerimiento de Santillana Digital',
+  otra_plataforma: 'Requerimiento de otra plataforma',
   otro: 'Consulta fuera de las funciones automáticas',
+};
+
+/**
+ * Motivos que van a un BUZÓN FIJO en vez de repartirse entre agentes.
+ *
+ * Un requerimiento de Santillana Digital no es un caso que el asistente no supo
+ * resolver: es de otro equipo desde el principio. Por eso no entra en el reparto
+ * por carga —repartirlo entre agentes de servicio sería mandarlo a quien no le
+ * corresponde— y se reenvía entero al buzón de Digital.
+ */
+const DESTINOS_FIJOS = {
+  santillana_digital: () => config.equipos.soporteDigital,
 };
 
 export function extraerCodigoCaso(texto) {
@@ -155,13 +169,20 @@ export async function crearEscalamiento({
   datosInstitucion,
   intentosPrevios,
 }) {
+  const destinoFijo = DESTINOS_FIJOS[motivo]?.();
+
   const agentes = config.agentes.correos;
-  if (agentes.length === 0) {
+  if (!destinoFijo && agentes.length === 0) {
     throw new Error('No hay agentes digitales configurados (AGENTES_DIGITALES)');
   }
 
   const col = await coleccionEscalamientos();
-  const agenteEmail = await elegirAgenteMenosCargado(col);
+  // Con destino fijo no se consulta la carga: el buzón es el que es.
+  const agenteEmail = destinoFijo || (await elegirAgenteMenosCargado(col));
+
+  if (!agenteEmail) {
+    throw new Error(`El motivo "${motivo}" no tiene destinatario configurado`);
+  }
 
   const codigo = `CASO-${randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}`;
   const motivoLegible = MOTIVOS_LEGIBLES[motivo] || motivo;
@@ -171,14 +192,23 @@ export async function crearEscalamiento({
   const resumen = String(resumenCorto || '').trim().slice(0, 70);
   const asuntoDelegacion = `[${codigo}] ${motivoLegible}${resumen ? ` — ${resumen}` : ''}`;
 
+  const esDeOtroEquipo = motivo === 'santillana_digital' || motivo === 'otra_plataforma';
+
   const cuerpoDelegacion = [
     'Hola,',
-    'El asistente automático de soporte **no pudo resolver este caso y te lo delega**. Toda la información que se pudo recopilar del usuario está abajo.',
+    esDeOtroEquipo
+      ? 'El asistente automático de soporte **te reenvía este requerimiento porque corresponde a tu ' +
+        'equipo**, no a las funciones que atiende de forma automática. Toda la información recopilada ' +
+        'del usuario está abajo.'
+      : 'El asistente automático de soporte **no pudo resolver este caso y te lo delega**. Toda la información que se pudo recopilar del usuario está abajo.',
     seccion('DATOS DEL CASO', `Código: **${codigo}**\nMotivo: ${motivoLegible}\nSolicitante: **${remitente}**\nAsunto original: ${asunto || '(sin asunto)'}`),
     seccion('QUÉ NECESITA EL USUARIO', descripcionDetallada),
-    seccion('DATOS DEL ESTUDIANTE', datosEstudiante),
+    seccion(esDeOtroEquipo ? 'DATOS DEL SOLICITANTE' : 'DATOS DEL ESTUDIANTE', datosEstudiante),
     seccion('DATOS DE LA INSTITUCIÓN', datosInstitucion),
-    seccion('QUÉ INTENTÓ EL ASISTENTE Y POR QUÉ FALLÓ', intentosPrevios),
+    seccion(
+      esDeOtroEquipo ? 'CONTEXTO DE LA CONVERSACIÓN' : 'QUÉ INTENTÓ EL ASISTENTE Y POR QUÉ FALLÓ',
+      intentosPrevios
+    ),
     '**CÓMO RESPONDER**\n**Responde a ESTE mismo correo** con la solución. Tu respuesta **se enviará automáticamente al usuario final**, en el hilo de correo donde él escribió originalmente — así que redáctala como si le hablaras directamente a él o ella. No hace falta que copies el código del caso.',
     'Soporte Santillana Ecuador (asistente automático)',
   ].join('\n\n');

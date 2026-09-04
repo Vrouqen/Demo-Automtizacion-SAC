@@ -106,23 +106,50 @@ export async function buscarColegio({ colegio, region, ciudad, canton }) {
  *  - HOMONIMOS: varios colegios con el mismo nombre; pedir ciudad/cantón
  *  - COLEGIO_NO_ENCONTRADO (con sugerencias de colegios parecidos)
  */
-export async function buscarEstudiante({ nombreCompleto, nivel, paralelo, colegio, region, ciudad, canton }) {
+export async function buscarEstudiante(args) {
+  return buscarPersona({ ...args, rol: 'estudiante' });
+}
+
+/**
+ * Credenciales de un DOCENTE.
+ *
+ * Los docentes viven en el mismo documento del colegio, en su propio arreglo y
+ * con el mismo cifrado. La única diferencia real es que no tienen grado ni
+ * paralelo: nadie puede aportarlos ni sirven para desempatar homónimos, así que
+ * aquí solo pesa el nombre.
+ */
+export async function buscarDocente(args) {
+  return buscarPersona({ ...args, rol: 'docente' });
+}
+
+/**
+ * Motor común de las dos búsquedas anteriores.
+ *
+ * Estudiantes y docentes se buscan igual —mismo colegio, mismo puntaje por
+ * nombre, mismos umbrales— y separarlos en dos funciones gemelas garantizaba
+ * que una se arreglara y la otra no.
+ */
+async function buscarPersona({ nombreCompleto, nivel, paralelo, colegio, region, ciudad, canton, rol }) {
+  const esDocente = rol === 'docente';
+  const campo = esDocente ? 'docentes' : 'estudiantes';
+  const ETIQUETA = esDocente ? 'DOCENTE' : 'ESTUDIANTE';
+
   const resColegio = await buscarColegio({ colegio, region, ciudad, canton });
   if (resColegio.status !== 'OK') return resColegio;
 
   // buscarColegio devolvió el colegio "liviano" (sin padrón). Ahora sí traemos
-  // el padrón de ESE único colegio para buscar al estudiante.
+  // el padrón de ESE único colegio para buscar a la persona.
   const col = await coleccionColegios();
   const docColegio = await col.findOne(
     { _id: resColegio.colegio._id },
-    { projection: { nombre: 1, region: 1, ciudad: 1, provincia: 1, canton: 1, estudiantes: 1 } }
+    { projection: { nombre: 1, region: 1, ciudad: 1, provincia: 1, canton: 1, [campo]: 1 } }
   );
-  let estudiantes = docColegio?.estudiantes || [];
+  let estudiantes = docColegio?.[campo] || [];
   if (estudiantes.length === 0) {
     return {
-      status: 'ESTUDIANTE_NO_ENCONTRADO',
+      status: `${ETIQUETA}_NO_ENCONTRADO`,
       colegio: docColegio.nombre,
-      detalle: 'El colegio no tiene estudiantes cargados.',
+      detalle: `El colegio no tiene ${campo} cargados.`,
     };
   }
 
@@ -155,8 +182,8 @@ export async function buscarEstudiante({ nombreCompleto, nivel, paralelo, colegi
       est: e,
       score:
         similitudNombres(nombreCompleto, e.nombreCompleto) +
-        (coincideCampo(e, 'grado', nivel) ? BONIFICACION : 0) +
-        (coincideCampo(e, 'grupo', paralelo) ? BONIFICACION : 0),
+        (!esDocente && coincideCampo(e, 'grado', nivel) ? BONIFICACION : 0) +
+        (!esDocente && coincideCampo(e, 'grupo', paralelo) ? BONIFICACION : 0),
     }))
     .sort((a, b) => b.score - a.score);
 
@@ -173,10 +200,12 @@ export async function buscarEstudiante({ nombreCompleto, nivel, paralelo, colegi
       colegio: docColegio.nombre,
       ciudad: docColegio.ciudad || docColegio.provincia,
       canton: docColegio.canton,
+      rol: esDocente ? 'docente' : 'estudiante',
       estudiante: {
         nombreCompleto: e.nombreCompleto,
-        grado: e.grado,
-        grupo: e.grupo,
+        // Un docente no tiene curso. Devolver los campos vacíos hacía que el
+        // modelo los escribiera en el correo como "Grado: undefined".
+        ...(esDocente ? {} : { grado: e.grado, grupo: e.grupo }),
         plataforma: e.plataforma,
         // Las credenciales viven cifradas en Mongo; se descifran solo aquí,
         // al momento de responder al usuario autorizado.
@@ -199,14 +228,16 @@ export async function buscarEstudiante({ nombreCompleto, nivel, paralelo, colegi
       status: 'CANDIDATOS',
       colegio: docColegio.nombre,
       cantidad: candidatos.length,
-      detalle:
-        'Hay más de una coincidencia parcial. NO reveles ni enumeres nombres de estudiantes: ' +
-        'pide al usuario el nombre COMPLETO tal cual está matriculado, el nivel/grado y el paralelo, ' +
-        'y vuelve a buscar con esos datos.',
+      detalle: esDocente
+        ? 'Hay más de una coincidencia parcial. NO reveles ni enumeres nombres de docentes: ' +
+          'pide al usuario su nombre COMPLETO tal cual consta en la institución y vuelve a buscar.'
+        : 'Hay más de una coincidencia parcial. NO reveles ni enumeres nombres de estudiantes: ' +
+          'pide al usuario el nombre COMPLETO tal cual está matriculado, el nivel/grado y el paralelo, ' +
+          'y vuelve a buscar con esos datos.',
     };
   }
 
-  return { status: 'ESTUDIANTE_NO_ENCONTRADO', colegio: docColegio.nombre };
+  return { status: `${ETIQUETA}_NO_ENCONTRADO`, colegio: docColegio.nombre };
 }
 
 /**
