@@ -394,8 +394,10 @@ export function referenciaSoporte(hiloId) {
  */
 export function textoPolitica({ hiloId } = {}) {
   const enlace = config.consentimiento.politicaUrl;
-  // Sin URL configurada no se escribe un enlace roto: se remite al correo del
-  // responsable de datos, que siempre existe.
+  // Publicada la política, el enlace es el único destino que se ofrece. El
+  // correo del responsable de datos queda como respaldo para el caso de que no
+  // haya URL configurada: un texto legal no puede quedarse sin ninguna vía, y
+  // un enlace roto es peor que ninguno.
   const dondeConsultar = enlace
     ? `en el siguiente enlace: ${enlace}`
     : `escribiendo a ${CORREO_DATOS}`;
@@ -431,7 +433,9 @@ export function textoPolitica({ hiloId } = {}) {
     'las 72 horas.**\n\n' +
     'Puedes ejercer alguno de tus derechos en datos personales o retirar tu consentimiento en ' +
     'cualquier momento siguiendo las instrucciones de la política de protección de datos personales ' +
-    `en el correo ${CORREO_DATOS}`
+    // Mismo criterio que arriba: se remite a la política publicada, y solo si
+    // no hay URL se cae al correo del responsable de datos.
+    (enlace ? `en ${enlace}` : `en el correo ${CORREO_DATOS}`)
   );
 }
 

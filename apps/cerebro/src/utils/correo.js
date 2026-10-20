@@ -134,7 +134,13 @@ function escaparHtml(texto) {
   return String(texto || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    // Las comillas también: en el cuerpo de un párrafo daban igual, pero desde
+    // que aEnlaces mete direcciones dentro de un href="…", una comilla del texto
+    // cerraría el atributo antes de tiempo y lo que viniera detrás se leería
+    // como más atributos de la etiqueta. Escapadas se ven idénticas.
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**
@@ -151,6 +157,37 @@ function escaparHtml(texto) {
  */
 export function aNegritas(textoEscapado) {
   return String(textoEscapado || '').replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>');
+}
+
+/**
+ * Convierte una URL escrita en el texto en un enlace pinchable.
+ *
+ * Sin esto, la dirección de la política de datos llegaba como texto plano: hay
+ * clientes de correo que la detectan solos y otros —Outlook de escritorio entre
+ * ellos— que no, y un enlace legal que hay que copiar a mano es un enlace que
+ * nadie abre.
+ *
+ * Igual que aNegritas, se aplica DESPUÉS de escapar el HTML: en ese punto un
+ * '<' del texto original ya es '&lt;', así que lo único capaz de producir una
+ * etiqueta es esta función. Se aceptan solo http y https, y se corta la
+ * puntuación final para que un punto o una coma de la frase no acabe dentro
+ * del href.
+ */
+export function aEnlaces(textoEscapado) {
+  // La cola recoge la puntuación con la que acaba la frase —incluidas las
+  // comillas ya escapadas— para que no termine dentro del enlace. Las comillas
+  // sin escapar quedan fuera del propio carácter de URL como segunda barrera:
+  // aunque escaparHtml ya las neutraliza, aquí no se depende de ello.
+  const COLA = /(?:[.,;:!?)]|&quot;|&#39;)*/.source;
+
+  // El '<' cierra la URL y también vale como final: se ejecuta DESPUÉS de
+  // aNegritas, así que una dirección en negrita llega seguida de '</strong>' y
+  // sin esto no se enlazaría.
+  return String(textoEscapado || '').replace(
+    new RegExp(`(https?://[^\\s<"']+?)(${COLA})(?=\\s|<|$)`, 'g'),
+    (_, url, cola) =>
+      `<a href="${url}" style="color:#1d4ed8;text-decoration:underline;">${url}</a>${cola}`
+  );
 }
 
 
@@ -173,7 +210,10 @@ export function textoAHtml(texto, { firma = true } = {}) {
     .filter(Boolean)
     .map(
       (p) =>
-        `<p style="margin:0 0 12px 0;">${aNegritas(escaparHtml(p)).replace(/\n/g, '<br>')}</p>`
+        // El orden importa: escapar, poner las negritas y enlazar al final. Al
+        // revés, los asteriscos de una dirección en **negrita** entraban en el
+        // href y acababa saliendo `href="https://…</strong>"`.
+        `<p style="margin:0 0 12px 0;">${aEnlaces(aNegritas(escaparHtml(p))).replace(/\n/g, '<br>')}</p>`
     );
   // Los correos al cliente van con la imagen de marca completa: banner de EDI
   // arriba, cuerpo, banner de contacto + confidencialidad, y firma. Los correos

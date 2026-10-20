@@ -92,9 +92,14 @@ export const config = {
     horasLimite: Number(process.env.CONSENTIMIENTO_HORAS || 48),
     // Solo aplica al alcance 'cliente': cuánto vale una aceptación (días).
     vigenciaDias: Number(process.env.CONSENTIMIENTO_VIGENCIA_DIAS || 365),
-    // Enlace a la política de protección de datos que cita el correo. Si queda
-    // vacío NO se escribe un enlace roto: el texto remite al correo de datos.
-    politicaUrl: (process.env.POLITICA_URL || '').trim(),
+    // Enlace a la política de protección de datos que cita el correo.
+    //
+    // El valor por defecto es la página publicada por Santillana Ecuador, de
+    // modo que el enlace exista aunque nadie configure la variable: es una
+    // obligación legal del correo de consentimiento, no un adorno. POLITICA_URL
+    // lo sustituye si la página cambia de dirección, y ponerla vacía a propósito
+    // hace que el texto remita al correo de datos en vez de a un enlace roto.
+    politicaUrl: (process.env.POLITICA_URL ?? 'https://www.santillana.com.ec/clausula-de-privacidad/').trim(),
     // Responsable de protección de datos: a donde se ejercen los derechos y se
     // retira el consentimiento. Es distinto del buzón de soporte.
     correoDatos: (process.env.CORREO_DATOS || 'datosec@santillana.com').trim(),

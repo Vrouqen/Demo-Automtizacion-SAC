@@ -121,7 +121,11 @@ export function registroIndividual({ rol, nombres, apellidos, login, contrasena,
   const clave = String(contrasena || '').trim();
 
   if (!usuario) throw error400('Falta el login del usuario');
-  if (!clave) throw error400('Falta la contraseña del usuario');
+  // La contraseña es OPCIONAL (Luis, 2026-10-20): la alimentación automática
+  // desde el datalake trae todo menos la clave —que no vive en las tablas en
+  // texto usable—, y esos registros entran marcados `incompleto` para cargarla
+  // a mano después. El resto del flujo ya lo contempla: solo se cifra si viene
+  // (ver más abajo `contrasena ? cifrar(...) : null`).
   if (!nombre && !apellido) throw error400('Indica al menos el nombre o el apellido del usuario');
 
   const esDocente = normalizar(rol) === 'docente';
@@ -134,7 +138,9 @@ export function registroIndividual({ rol, nombres, apellidos, login, contrasena,
     grado: esDocente ? null : String(nivel || '').trim() || null,
     grupo: esDocente ? null : String(paralelo || '').trim() || null,
     login: usuario,
-    contrasena: clave,
+    // null, no '': sin contraseña el registro queda `incompleto` y los
+    // descifrados lo tratan igual que a los demás huecos.
+    contrasena: clave || null,
     nombreCompleto,
     nombreNormalizado: normalizar(nombreCompleto),
   };
