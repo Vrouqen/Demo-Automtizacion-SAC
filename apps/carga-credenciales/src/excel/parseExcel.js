@@ -154,6 +154,49 @@ export function registroIndividual({ rol, nombres, apellidos, login, contrasena,
 }
 
 /**
+ * Construye estudiantes y docentes desde una LISTA JSON, no un Excel
+ * (Luis, 2026-10-20).
+ *
+ * Es la puerta de la alimentación automática desde el datalake: cada registro
+ * trae login, nombre, grado y paralelo, pero NO contraseña —esa no vive en las
+ * tablas en texto usable y se carga a mano aparte—. Un registro sin login se
+ * descarta: el login es la identidad de la persona (ver idDeFila en handler).
+ */
+export function registrosDesdeLista(registros) {
+  const estudiantes = [];
+  const docentes = [];
+  for (const r of Array.isArray(registros) ? registros : []) {
+    const usuario = String(r.login || '').trim();
+    if (!usuario) continue;
+
+    const nombre = String(r.nombres ?? r.nombre ?? '').trim();
+    const apellido = String(r.apellidos ?? r.apellido ?? '').trim();
+    const esDocente = normalizar(r.rol) === 'docente';
+    const clave = String(r.contrasena ?? '').trim();
+    const nombreCompleto = [nombre, apellido].filter(Boolean).join(' ').trim();
+
+    const reg = {
+      nombre: nombre || null,
+      apellidos: apellido || null,
+      grado: esDocente ? null : String(r.nivel ?? r.grado ?? '').trim() || null,
+      grupo: esDocente ? null : String(r.paralelo ?? r.grupo ?? '').trim() || null,
+      login: usuario,
+      contrasena: clave || null,
+      nombreCompleto,
+      nombreNormalizado: normalizar(nombreCompleto),
+    };
+    (esDocente ? docentes : estudiantes).push(reg);
+  }
+
+  return {
+    estudiantes,
+    docentes,
+    hojasProcesadas: [{ hoja: 'lista', rol: 'mixto', filas: estudiantes.length + docentes.length }],
+    hojasIgnoradas: [],
+  };
+}
+
+/**
  * Parsea un Excel de credenciales y devuelve estudiantes Y docentes.
  *
  * Reglas de asignación de cada hoja:

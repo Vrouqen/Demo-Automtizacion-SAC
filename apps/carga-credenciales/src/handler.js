@@ -4,7 +4,7 @@ import { gzipSync } from 'zlib';
 import { createHash } from 'crypto';
 import path from 'path';
 import { config, validarConfig } from './config.js';
-import { parsearExcelCredenciales, registroIndividual } from './excel/parseExcel.js';
+import { parsearExcelCredenciales, registroIndividual, registrosDesdeLista } from './excel/parseExcel.js';
 import { coleccionColegios, coleccionAdcol } from './db/mongo.js';
 import { normalizar } from './utils/similitud.js';
 import { buscarPorNombre } from './utils/busquedaNombre.js';
@@ -666,12 +666,14 @@ const responder = async (event) => {
     // obligatorio y único). Así el _id nunca queda vacío.
     const idColegio = String(body.idColegio || '').trim() || String(codigoColegio || '').trim();
 
-    // Dos formas de cargar: un Excel completo, o UN usuario suelto desde el
-    // formulario individual. El resto del flujo es idéntico para ambas.
+    // Tres formas de cargar: un Excel completo, UN usuario suelto desde el
+    // formulario individual, o una LISTA JSON (la alimentación automática
+    // desde el datalake, Luis 2026-10-20). El resto del flujo es idéntico.
     const esIndividual = Boolean(body.individual);
+    const esLista = Array.isArray(body.registros);
 
     const requeridos = ['codigoColegio', 'nombreColegio', 'plataforma', 'periodo'];
-    if (!esIndividual) requeridos.push('archivoBase64');
+    if (!esIndividual && !esLista) requeridos.push('archivoBase64');
     const faltantes = requeridos.filter((campo) => !body[campo]);
     if (faltantes.length > 0) {
       return respuestaJson(400, { error: `Faltan campos obligatorios: ${faltantes.join(', ')}` });
@@ -696,6 +698,8 @@ const responder = async (event) => {
     if (esIndividual) {
       // Lanza un error 400 con el detalle si faltan login/contraseña/nombre.
       datos = registroIndividual(body.individual);
+    } else if (esLista) {
+      datos = registrosDesdeLista(body.registros);
     } else {
       if (nombreArchivo && !/\.(xlsx|xlsm|xltx|xltm)$/i.test(nombreArchivo)) {
         return respuestaJson(400, { error: 'El archivo debe ser Excel (.xlsx)' });
@@ -755,6 +759,64 @@ const responder = async (event) => {
       return { registros: salida, resumen };
     };
 
+    // Sincronización AUTORITATIVA (Luis, 2026-10-20): la lista entrante es la
+    // verdad para esta plataforma+periodo. Se usa con ?sincronizar=1, para la
+    // alimentación desde el datalake. Dos diferencias con fusionar():
+    //
+    //  1. CONSERVA la contraseña ya guardada cuando la entrante no trae. La
+    //     clave se carga a mano y la alimentación automática viene sin ella;
+    //     sin esto, cada sincronización borraría el trabajo manual.
+    //  2. BORRA a quien ya no venga en la lista (los sobrantes), que es justo
+    //     lo que fusionar() NO hace.
+    //
+    // El nombre, el grado y el grupo SÍ se actualizan con lo entrante: pueden
+    // corregirse, y el login manda como identidad.
+    const sincronizar = (guardados, filas) => {
+      const previos = new Map();
+      guardados.forEach((r) => previos.set(idDeGuardado(r), r));
+
+      const vistos = new Set();
+      const salida = [];
+      const resumen = { filas: filas.length, nuevos: 0, actualizados: 0, sinCambios: 0, eliminados: 0 };
+
+      for (const fila of filas) {
+        const id = idDeFila(fila);
+        if (vistos.has(id)) continue; // la lista podría traer el mismo login dos veces
+        vistos.add(id);
+
+        const antes = previos.get(id);
+        if (!antes) {
+          salida.push(preparar(fila));
+          resumen.nuevos++;
+          continue;
+        }
+
+        // Conserva la clave previa si la entrante no trae una.
+        const clavePrevia = descifrar(antes.contrasena, config.cifrado.clave);
+        const claveFinal = (fila.contrasena ?? '') !== '' ? fila.contrasena : clavePrevia;
+        const nuevaFila = { ...fila, contrasena: claveFinal };
+        salida.push(preparar(nuevaFila));
+
+        const cambio =
+          !mismoValor(antes.nombreCompleto, nuevaFila.nombreCompleto) ||
+          !mismoValor(antes.grado, nuevaFila.grado) ||
+          !mismoValor(antes.grupo, nuevaFila.grupo) ||
+          !mismoValor(clavePrevia, claveFinal);
+        if (cambio) resumen.actualizados++;
+        else resumen.sinCambios++;
+      }
+
+      resumen.eliminados = guardados.filter((r) => !vistos.has(idDeGuardado(r))).length;
+      return { registros: salida, resumen };
+    };
+
+    // En sincronización solo se reconcilia el rol que TRAE datos: una lista
+    // vacía deja ese rol intacto, NO lo vacía. Así una sincronización de solo
+    // estudiantes no borra a los docentes, y —más importante— un fallo que
+    // devuelva cero filas no arrasa el padrón entero.
+    const combinar = (guardados, filas) =>
+      query.sincronizar && filas.length > 0 ? sincronizar(guardados, filas) : fusionar(guardados, filas);
+
     // Separa lo que esta carga toca (misma plataforma+periodo) de lo que debe
     // quedar intacto (otras plataformas u otros periodos).
     const esDeEstaCarga = (r) => r.plataforma === plataforma && (!r.periodo || r.periodo === periodo);
@@ -766,12 +828,13 @@ const responder = async (event) => {
         // de esta carga en vez de quedar huérfanos sin periodo para siempre.
         .map((r) => (r.periodo ? r : { ...r, periodo }));
 
-    const fusEstudiantes = fusionar(deEstaCarga(existente?.estudiantes), datos.estudiantes);
+    const fusEstudiantes = combinar(deEstaCarga(existente?.estudiantes), datos.estudiantes);
     const estudiantes = [...intactos(existente?.estudiantes), ...fusEstudiantes.registros];
 
-    // Los docentes se fusionan igual que los estudiantes (misma plataforma+
-    // periodo, sin borrar a quien no venga en el archivo).
-    const fusDocentes = fusionar(deEstaCarga(existente?.docentes), datos.docentes);
+    // Los docentes se tratan igual que los estudiantes. En sincronización, una
+    // lista de solo estudiantes NO borra a los docentes, ni al revés: cada
+    // carga trae su rol y sincronizar() solo reconcilia lo que recibe.
+    const fusDocentes = combinar(deEstaCarga(existente?.docentes), datos.docentes);
     const docentes = [...intactos(existente?.docentes), ...fusDocentes.registros];
 
     const resultado = await col.updateOne(
