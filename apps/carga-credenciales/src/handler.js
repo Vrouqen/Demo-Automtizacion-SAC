@@ -664,7 +664,7 @@ const responder = async (event) => {
     // El id de Pegasus es OPCIONAL: no todos los colegios lo tienen a la mano al
     // cargar. Si no viene, la identidad del documento es su código (que sí es
     // obligatorio y único). Así el _id nunca queda vacío.
-    const idColegio = String(body.idColegio || '').trim() || String(codigoColegio || '').trim();
+    let idColegio = String(body.idColegio || '').trim() || String(codigoColegio || '').trim();
 
     // Tres formas de cargar: un Excel completo, UN usuario suelto desde el
     // formulario individual, o una LISTA JSON (la alimentación automática
@@ -720,7 +720,25 @@ const responder = async (event) => {
     });
 
     const col = await coleccionColegios();
-    const existente = await col.findOne({ _id: idColegio });
+    let existente = await col.findOne({ _id: idColegio });
+    // Si no existe con ese id pero sí hay un colegio con el mismo código, es
+    // ese (Luis, 2026-10-21): los creados a mano a veces llevan otro id de
+    // Pegasus que el del avance (p. ej. Academia Militar San Diego, 31069 a
+    // mano y 12008 en el avance), y la alimentación automática duplicaba el
+    // colegio en vez de cargarle los alumnos.
+    if (!existente && String(codigoColegio || '').trim()) {
+      const porCodigo = await col.findOne({ codigo: String(codigoColegio).trim() });
+      if (porCodigo) {
+        existente = porCodigo;
+        idColegio = porCodigo._id;
+      }
+    }
+    // Región, ciudad y cantón: si la carga no los trae (la alimentación
+    // automática no los conoce), se conservan los que ya tenía el colegio en
+    // vez de pisarlos con "n/a" (2026-10-21).
+    const regionFinal = region || existente?.region || 'n/a';
+    const ciudadFinal = ciudad || existente?.ciudad || existente?.provincia || 'n/a';
+    const cantonFinal = canton || existente?.canton || 'n/a';
 
     // Identidad de una persona dentro de un colegio: su login de plataforma y,
     // si la fila no lo trae, su nombre completo. Ojo: cifrar() usa un IV
@@ -844,15 +862,15 @@ const responder = async (event) => {
           codigo: codigoColegio,
           nombre: nombreColegio,
           nombreNormalizado: normalizar(nombreColegio),
-          region: region || 'n/a',
-          regionNormalizada: normalizar(region || 'n/a'),
-          ciudad: ciudad || 'n/a',
-          ciudadNormalizada: normalizar(ciudad || 'n/a'),
+          region: regionFinal,
+          regionNormalizada: normalizar(regionFinal),
+          ciudad: ciudadFinal,
+          ciudadNormalizada: normalizar(ciudadFinal),
           // compat: código previo usaba "provincia" — se mantiene como espejo de ciudad
-          provincia: ciudad || 'n/a',
-          provinciaNormalizada: normalizar(ciudad || 'n/a'),
-          canton: canton || 'n/a',
-          cantonNormalizado: normalizar(canton || 'n/a'),
+          provincia: ciudadFinal,
+          provinciaNormalizada: normalizar(ciudadFinal),
+          canton: cantonFinal,
+          cantonNormalizado: normalizar(cantonFinal),
           estudiantes,
           docentes,
           hojasProcesadas: datos.hojasProcesadas,
@@ -866,9 +884,9 @@ const responder = async (event) => {
       id: idColegio,
       codigo: codigoColegio,
       nombre: nombreColegio,
-      region: region || 'n/a',
-      ciudad: ciudad || 'n/a',
-      canton: canton || 'n/a',
+      region: regionFinal,
+      ciudad: ciudadFinal,
+      canton: cantonFinal,
       plataforma,
       periodo,
       // Cada hoja procesada con el rol (estudiantes/docentes) que se le asignó.
