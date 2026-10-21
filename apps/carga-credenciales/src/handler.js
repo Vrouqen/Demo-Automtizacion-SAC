@@ -736,9 +736,19 @@ const responder = async (event) => {
     // Región, ciudad y cantón: si la carga no los trae (la alimentación
     // automática no los conoce), se conservan los que ya tenía el colegio en
     // vez de pisarlos con "n/a" (2026-10-21).
-    const regionFinal = region || existente?.region || 'n/a';
-    const ciudadFinal = ciudad || existente?.ciudad || existente?.provincia || 'n/a';
-    const cantonFinal = canton || existente?.canton || 'n/a';
+    // Si tampoco la tenía, la región se toma de adcol (el catálogo de
+    // colegios, que sí la trae). Ciudad y cantón no tienen otra fuente.
+    const dato = (v) => (v && String(v).trim().toLowerCase() !== 'n/a' ? v : null);
+    let regionFinal = dato(region) || dato(existente?.region);
+    if (!regionFinal) {
+      const enAdcol = await (await coleccionAdcol()).findOne(
+        { $or: [{ _id: idColegio }, { codigo: String(codigoColegio || '').trim() }] },
+        { projection: { region: 1 } }
+      );
+      regionFinal = dato(enAdcol?.region) || 'n/a';
+    }
+    const ciudadFinal = dato(ciudad) || dato(existente?.ciudad) || dato(existente?.provincia) || 'n/a';
+    const cantonFinal = dato(canton) || dato(existente?.canton) || 'n/a';
 
     // Identidad de una persona dentro de un colegio: su login de plataforma y,
     // si la fila no lo trae, su nombre completo. Ojo: cifrar() usa un IV
