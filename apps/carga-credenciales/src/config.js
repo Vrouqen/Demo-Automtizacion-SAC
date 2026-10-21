@@ -22,7 +22,10 @@ export const config = {
   // Compartir/CREO. RLP y RS están implementadas (parser en inglés, pestañas
   // Teachers/Students) pero DESACTIVADAS a propósito: la UI deshabilita sus
   // botones y el backend rechaza sus cargas hasta que se pasen a producción.
-  plataformasPermitidas: ['compartir', 'creo', 'sumun'],
+  // Práctica (Santillana Plus) entra solo por la alimentación automática de
+  // Tablas-PAS (sac:sincronizar --plataforma=practica, 2026-10-21): login y
+  // contraseña vienen de su API. No tiene botón en el formulario de carga.
+  plataformasPermitidas: ['compartir', 'creo', 'sumun', 'practica'],
   // Reconocidas por el parser pero no habilitadas todavía (para el mensaje de
   // error y para documentar que existen).
   plataformasEnEspera: ['rlp', 'rs'],
