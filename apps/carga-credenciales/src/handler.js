@@ -102,7 +102,7 @@ function comprimir(event, respuesta) {
  *     ciudad,           // Ciudad (Provincia) — se acepta también "provincia"
  *     canton,           // Cantón
  *     nombreColegio,    // Nombre del colegio (del avance)
- *     plataforma,       // OBLIGATORIO: solo "compartir" o "creo"
+ *     plataforma,       // OBLIGATORIO: "edi" (antes "compartir" y "creo", ya unificadas)
  *     periodo,          // OBLIGATORIO: periodo escolar, formato "2026-2027"
  *     nombreArchivo, archivoBase64
  *   }

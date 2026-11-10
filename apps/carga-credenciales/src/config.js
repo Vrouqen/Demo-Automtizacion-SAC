@@ -25,7 +25,11 @@ export const config = {
   // Práctica (Santillana Plus) entra solo por la alimentación automática de
   // Tablas-PAS (sac:sincronizar --plataforma=practica, 2026-10-21): login y
   // contraseña vienen de su API. No tiene botón en el formulario de carga.
-  plataformasPermitidas: ['compartir', 'creo', 'sumun', 'practica'],
+  // 'compartir' y 'creo' siguen aceptándose SOLO para no romper cargas en
+  // vuelo ni enlaces viejos: desde la unificación son la misma plataforma, EDI,
+  // y la interfaz ya no ofrece ninguna de las dos. Lo que entre con ellas se
+  // guarda tal cual; el script scripts/unificar-edi.mjs es quien las convierte.
+  plataformasPermitidas: ['edi', 'compartir', 'creo', 'sumun', 'practica'],
   // Reconocidas por el parser pero no habilitadas todavía (para el mensaje de
   // error y para documentar que existen).
   plataformasEnEspera: ['rlp', 'rs'],
