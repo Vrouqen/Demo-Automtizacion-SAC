@@ -13,7 +13,20 @@ const CAMPOS = {
   apellidoMaterno: ['apellido materno', 'ap materno', 'apellido2', 'segundo apellido'],
   apellidos: ['apellidos', 'apellido', 'last name', 'lastname', 'surname', 'apellido completo'],
   nombre: ['nombre', 'nombres', 'first name', 'firstname', 'given name'],
-  login: ['login', 'usuario', 'user', 'username', 'user name'],
+  // "Nombre de usuario (login)" es el encabezado que trae Práctica. Se listan
+  // las variantes completas en vez de buscar por coincidencia parcial: la hoja
+  // de Familiares tiene un "Usuario del padre" que NO es el login del docente,
+  // y una búsqueda laxa lo habría tomado por tal.
+  login: [
+    'login',
+    'usuario',
+    'user',
+    'username',
+    'user name',
+    'nombre de usuario login',
+    'nombre de usuario',
+    'usuario login',
+  ],
   contrasena: ['contrasena', 'contraseña', 'password', 'clave', 'pass'],
 };
 
@@ -208,7 +221,7 @@ export function registrosDesdeLista(registros) {
  * Devuelve las dos listas (cualquiera puede ir vacía), las hojas procesadas con
  * el rol asignado, y las que se ignoraron por no ser parseables.
  */
-export function parsearExcelCredenciales(buffer) {
+export function parsearExcelCredenciales(buffer, { soloDocentes = false } = {}) {
   let libro;
   try {
     libro = XLSX.read(buffer, { type: 'buffer' });
@@ -231,14 +244,27 @@ export function parsearExcelCredenciales(buffer) {
       continue;
     }
     const rol = rolPorNombreHoja(nombreHoja) || rolPorColumnas(campos);
+
+    // En Práctica los estudiantes los carga sola Tablas-PAS desde su API; aquí
+    // solo entran los docentes. Subir también los alumnos de un Excel crearía
+    // una segunda copia que pelea con la automática, así que sus hojas se
+    // descartan aunque vengan en el archivo.
+    if (soloDocentes && rol !== 'docentes') {
+      hojasIgnoradas.push(nombreHoja);
+      continue;
+    }
+
     (rol === 'docentes' ? docentes : estudiantes).push(...registros);
     hojasProcesadas.push({ hoja: nombreHoja, rol, filas: registros.length });
   }
 
   if (estudiantes.length === 0 && docentes.length === 0) {
     throw error400(
-      'No se encontraron credenciales válidas en el archivo. Revisa que haya una fila de ' +
-        'encabezados con al menos Login/Usuario y el Nombre (o Apellidos).'
+      soloDocentes
+        ? 'No se encontró ninguna hoja de docentes en el archivo. En Práctica solo se cargan ' +
+            'docentes: los estudiantes entran solos desde Tablas-PAS, así que sus hojas se ignoran.'
+        : 'No se encontraron credenciales válidas en el archivo. Revisa que haya una fila de ' +
+            'encabezados con al menos Login/Usuario y el Nombre (o Apellidos).'
     );
   }
 

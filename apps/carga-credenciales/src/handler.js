@@ -705,7 +705,9 @@ const responder = async (event) => {
         return respuestaJson(400, { error: 'El archivo debe ser Excel (.xlsx)' });
       }
       const buffer = Buffer.from(archivoBase64, 'base64');
-      datos = parsearExcelCredenciales(buffer);
+      // Práctica solo admite docentes: sus estudiantes llegan por la API de
+      // Tablas-PAS, no por este formulario.
+      datos = parsearExcelCredenciales(buffer, { soloDocentes: plataforma === 'practica' });
     }
 
     // Marca plataforma + periodo y cifra las credenciales antes de tocar la

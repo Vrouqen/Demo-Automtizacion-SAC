@@ -188,13 +188,59 @@ async function buscarPersona({ nombreCompleto, nivel, paralelo, colegio, region,
     .sort((a, b) => b.score - a.score);
 
   const mejor = puntuados[0];
-  const segundo = puntuados[1];
+
+  /**
+   * Filas que empatan con la mejor. Antes bastaba con que existiera una segunda
+   * parecida para declarar el caso ambiguo, y eso se rompió al permitir que una
+   * persona tenga credenciales en varias plataformas: EDI, Práctica, RLP y RS
+   * son cuatro filas con el MISMO nombre y puntaje idéntico, así que el empate
+   * era inevitable y el asistente pedía "precisa los datos" en bucle, sin que
+   * ningún dato pudiera deshacerlo.
+   *
+   * Un empate entre filas de la misma persona no es ambigüedad: son sus cuentas.
+   * Solo hay homónimos de verdad cuando los nombres difieren.
+   */
+  const empatados = puntuados.filter((p) => p.score >= mejor.score - 0.1);
+  const mismaPersona = (a, b) =>
+    normalizar(a.nombreNormalizado || a.nombreCompleto) ===
+    normalizar(b.nombreNormalizado || b.nombreCompleto);
+  const todasDeLaMismaPersona = empatados.every((p) => mismaPersona(p.est, mejor.est));
+
+  /*
+   * Y que CADA fila empatada sea de una plataforma distinta.
+   *
+   * El mismo nombre no basta para dar por hecho que es la misma persona: en un
+   * colegio hay dos niños que se llaman igual, y sus filas empatan con idéntico
+   * puntaje. Si dos de las empatadas comparten plataforma no pueden ser cuentas
+   * de una sola persona —nadie tiene dos accesos a EDI—, así que son personas
+   * distintas y hay que preguntar en vez de entregar las credenciales de una de
+   * ellas al azar, que sería dar los datos del hijo de otro.
+   */
+  const plataformasEmpatadas = empatados.map((p) => p.est.plataforma || '');
+  const sinPlataformaRepetida = new Set(plataformasEmpatadas).size === plataformasEmpatadas.length;
 
   const esUnicoConfiable =
-    mejor && mejor.score >= UMBRAL_ESTUDIANTE_OK && (!segundo || segundo.score < mejor.score - 0.1);
+    mejor && mejor.score >= UMBRAL_ESTUDIANTE_OK && todasDeLaMismaPersona && sinPlataformaRepetida;
 
   if (esUnicoConfiable) {
     const e = mejor.est;
+
+    // Una credencial por plataforma, sin repetir plataforma. Se entregan TODAS:
+    // quien escribe pregunta por su hijo, no por una plataforma concreta, y
+    // devolver solo una lo dejaría sin saber que tiene las demás.
+    const credenciales = [];
+    const vistas = new Set();
+    for (const { est } of empatados) {
+      const plataforma = est.plataforma || '';
+      if (vistas.has(plataforma)) continue;
+      vistas.add(plataforma);
+      credenciales.push({
+        plataforma,
+        login: descifrar(est.login, config.cifrado.clave),
+        contrasena: descifrar(est.contrasena, config.cifrado.clave),
+      });
+    }
+
     return {
       status: 'OK',
       colegio: docColegio.nombre,
@@ -206,11 +252,13 @@ async function buscarPersona({ nombreCompleto, nivel, paralelo, colegio, region,
         // Un docente no tiene curso. Devolver los campos vacíos hacía que el
         // modelo los escribiera en el correo como "Grado: undefined".
         ...(esDocente ? {} : { grado: e.grado, grupo: e.grupo }),
-        plataforma: e.plataforma,
-        // Las credenciales viven cifradas en Mongo; se descifran solo aquí,
-        // al momento de responder al usuario autorizado.
-        login: descifrar(e.login, config.cifrado.clave),
-        contrasena: descifrar(e.contrasena, config.cifrado.clave),
+        // Se mantienen los campos sueltos de la primera credencial por
+        // compatibilidad con lo que ya leía el modelo; `credenciales` es la
+        // lista completa y es la que debe usar cuando hay más de una.
+        plataforma: credenciales[0].plataforma,
+        login: credenciales[0].login,
+        contrasena: credenciales[0].contrasena,
+        credenciales,
       },
       score: mejor.score,
     };

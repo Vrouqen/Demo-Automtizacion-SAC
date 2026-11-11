@@ -29,10 +29,15 @@ export const config = {
   // vuelo ni enlaces viejos: desde la unificación son la misma plataforma, EDI,
   // y la interfaz ya no ofrece ninguna de las dos. Lo que entre con ellas se
   // guarda tal cual; el script scripts/unificar-edi.mjs es quien las convierte.
-  plataformasPermitidas: ['edi', 'compartir', 'creo', 'sumun', 'practica'],
-  // Reconocidas por el parser pero no habilitadas todavía (para el mensaje de
-  // error y para documentar que existen).
-  plataformasEnEspera: ['rlp', 'rs'],
+  //
+  // Una persona puede tener credenciales en VARIAS de estas a la vez: son
+  // productos independientes y no se pisan entre sí. La fusión de cada carga
+  // solo toca las filas de su misma plataforma y periodo (ver `esDeEstaCarga`
+  // en handler.js), así que subir RLP no borra lo de EDI ni al revés.
+  plataformasPermitidas: ['edi', 'compartir', 'creo', 'sumun', 'practica', 'rlp', 'rs'],
+  // Ya no queda ninguna en espera: RLP y Richmond Studio se habilitaron a
+  // petición del área (2026-11-11).
+  plataformasEnEspera: [],
 };
 
 export function validarConfig() {
